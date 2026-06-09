@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>EC20 Manager</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/device.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -34,7 +35,9 @@
       </section>
 
       <section class="device-main">
-        <div id="deviceBanner" class="device-banner card empty"><span class="logo">V</span><div><h2>等待选择设备</h2><p>扫描或添加一台 EC20 设备</p></div></div>
+        <div id="emptyDevice" class="empty-device card">暂无设备</div>
+        <div id="deviceContent" class="device-content hidden">
+        <div id="deviceBanner" class="device-banner card"></div>
         <div class="detail card">
           <div class="tabs">
             <button class="active" data-tab="overview">概览</button>
@@ -69,12 +72,30 @@
             </form>
           </div>
         </div>
+        </div>
       </section>
     </div>
   </main>
 
   <div id="modal" class="modal">
-    <div class="modal-box"><button id="closeModal" class="close">×</button><h2>添加设备配置</h2><p>选择扫描到的设备，系统会自动填充 AT 端口与识别信息。</p><div id="scanResults"></div></div>
+    <div class="modal-box">
+      <button id="closeModal" class="close">×</button><h2>添加设备配置</h2>
+      <p>选择一个“未配置”的设备，系统将自动填充 AT 端口与识别信息。</p>
+      <div id="scanResults"></div>
+      <section id="addConfig" class="add-config hidden">
+        <div id="selectedScan" class="selected-scan"></div>
+        <form id="addForm" class="config-grid">
+          <label>ID<input name="id" required placeholder="例如 ec20_3"></label><label>名称<input name="name" placeholder="显示名称（可选）"></label>
+          <label>IMEI 绑定<input name="imei" readonly></label><label>USB 路径<input name="usb_path" readonly></label>
+          <label>网卡接口<input name="network_interface"></label><label>AT 端口<input name="at_port" readonly required></label>
+          <label>控制设备<input name="control_device"></label><label>APN（可选）<input name="apn" placeholder="留空自动识别"></label>
+          <div class="setting"><div><b>设备后端模式</b><small>AT=串口 / QMI=纯 QMI</small></div><select name="mode"><option>AT</option><option>QMI</option></select></div>
+          <label class="setting"><div><b>开启网络</b><small>通过 QMI 控制网络开启</small></div><input name="network_enabled" type="checkbox"></label>
+          <label class="setting"><div><b>VoWiFi</b><small>开启后设备将进入飞行模式</small></div><input name="vowifi" type="checkbox"></label>
+        </form>
+        <div class="modal-actions"><button id="cancelAdd" class="light" type="button">取消</button><button id="saveAdd" type="button">保存</button></div>
+      </section>
+    </div>
   </div>
   <div id="toast"></div>
   <script src="/app.js"></script>

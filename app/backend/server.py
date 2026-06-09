@@ -76,7 +76,6 @@ def all_devices():
         merged["online"] = bool(merged.get("at_port") in MODEM.ports() and merged.get("status"))
         merged["configured"] = True
         result.append(merged)
-    result.extend(discovered.values())
     return result
 
 

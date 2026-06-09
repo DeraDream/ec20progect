@@ -1,0 +1,8 @@
+.hidden{display:none!important}
+.device-content{display:grid;gap:24px}
+.empty-device{min-height:110px;padding:42px;color:#788497}
+.modal-box{width:min(900px,94vw);max-height:94vh}
+.scan-card.active{border-color:#5f9cff;background:#eef3ff}
+.selected-scan{border:1px solid #dce4ef;border-radius:13px;padding:16px;margin:18px 0;background:#f7f9fc}
+.add-config .config-grid{margin-top:18px}
+.modal-actions{display:flex;justify-content:flex-end;gap:14px;margin-top:22px}

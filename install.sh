@@ -140,20 +140,37 @@ install_service_if_present() {
     return
   fi
 
+  python3 -m py_compile "${INSTALL_DIR}/app/backend/ec20.py" "${INSTALL_DIR}/app/backend/server.py" ||
+    die "后端 Python 语法检查失败"
   install -m 644 "${service_source}" "/etc/systemd/system/${SERVICE_NAME}"
   systemctl daemon-reload
   systemctl enable "${SERVICE_NAME}"
   systemctl restart "${SERVICE_NAME}"
+  local healthy="false"
+  local attempt
+  for attempt in {1..10}; do
+    if systemctl is-active --quiet "${SERVICE_NAME}" &&
+      curl --fail --silent --max-time 2 http://127.0.0.1:7571/api/health >/dev/null; then
+      healthy="true"
+      break
+    fi
+    sleep 1
+  done
+  if [[ "${healthy}" != "true" ]]; then
+    journalctl -u "${SERVICE_NAME}" -n 30 --no-pager >&2 || true
+    die "Web 服务健康检查失败，以上为服务日志"
+  fi
 }
 
 get_web_ip() {
   local address=""
-  if command -v ip >/dev/null 2>&1; then
-    address="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
-  fi
-  if [[ -z "${address}" ]]; then
-    address="$(hostname -I 2>/dev/null | awk '{print $1}')"
-  fi
+  address="$(hostname -I 2>/dev/null | tr ' ' '\n' | awk -F. '
+    /^10\./ {print; exit}
+    /^192\.168\./ {print; exit}
+    /^172\./ && $2 >= 16 && $2 <= 31 {print; exit}
+  ')"
+  [[ -n "${address}" ]] || address="$(hostname -I 2>/dev/null | tr ' ' '\n' |
+    awk '!/^$/ && !/^127\./ && !/^169\.254\./ && !/^198\.(18|19)\./ {print; exit}')"
   printf '%s' "${address:-127.0.0.1}"
 }
 
