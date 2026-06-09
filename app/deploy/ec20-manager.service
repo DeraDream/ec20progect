@@ -8,7 +8,6 @@ WorkingDirectory=/opt/ec20-manager/app/backend
 Environment=EC20_DATA_DIR=/opt/ec20-manager/data
 Environment=EC20_WEB_HOST=0.0.0.0
 Environment=EC20_WEB_PORT=7571
-EnvironmentFile=-/opt/ec20-manager/data/web.env
 ExecStart=/usr/bin/python3 /opt/ec20-manager/app/backend/server.py
 Restart=on-failure
 RestartSec=3

@@ -146,6 +146,17 @@ install_service_if_present() {
   systemctl restart "${SERVICE_NAME}"
 }
 
+get_web_ip() {
+  local address=""
+  if command -v ip >/dev/null 2>&1; then
+    address="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  fi
+  if [[ -z "${address}" ]]; then
+    address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  printf '%s' "${address:-127.0.0.1}"
+}
+
 deploy_from_source() {
   local source_root="$1"
   local mode="$2"
@@ -155,11 +166,6 @@ deploy_from_source() {
   ensure_environment
 
   mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/backups"
-  if [[ ! -f "${INSTALL_DIR}/data/web.env" ]]; then
-    umask 077
-    printf 'EC20_WEB_TOKEN=%s\n' "$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')" \
-      >"${INSTALL_DIR}/data/web.env"
-  fi
   rm -rf "${new_app}"
   mkdir -p "${new_app}"
   cp -a "${source_root}/app/." "${new_app}/"
@@ -176,8 +182,7 @@ deploy_from_source() {
   ok "$([[ "${mode}" == "update" ]] && printf '更新' || printf '安装')完成"
   printf '工程目录：%s\n数据目录：%s\n菜单命令：ec20\n' \
     "${INSTALL_DIR}" "${INSTALL_DIR}/data"
-  printf 'Web 地址：http://服务器IP:7571\n访问令牌：%s\n' \
-    "$(sed -n 's/^EC20_WEB_TOKEN=//p' "${INSTALL_DIR}/data/web.env")"
+  printf 'Web 地址：http://%s:7571\n' "$(get_web_ip)"
 }
 
 install_or_update() {

@@ -1,58 +1,65 @@
-const $ = (s) => document.querySelector(s);
-const api = async (path, options = {}) => {
-  let token = localStorage.getItem("ec20Token") || "";
-  let response = await fetch(path, {headers: {"Content-Type": "application/json", "Authorization": `Bearer ${token}`}, ...options});
-  if (response.status === 401) {
-    token = prompt("请输入安装时生成的 EC20 Web 访问令牌") || "";
-    localStorage.setItem("ec20Token", token);
-    response = await fetch(path, {headers: {"Content-Type": "application/json", "Authorization": `Bearer ${token}`}, ...options});
-  }
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (path, options={}) => {
+  const response = await fetch(path,{headers:{"Content-Type":"application/json"},...options});
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "请求失败");
+  if(!response.ok) throw new Error(data.error || "请求失败");
   return data;
 };
-const toast = (text) => {
-  $("#toast").textContent = text; $("#toast").classList.add("show");
-  setTimeout(() => $("#toast").classList.remove("show"), 2400);
-};
-const escapeHtml = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const post = (path,data) => api(path,{method:"POST",body:JSON.stringify(data)});
+const toast = text => {$("#toast").textContent=text;$("#toast").classList.add("show");setTimeout(()=>$("#toast").classList.remove("show"),2400)};
+let devices=[], selected=null, scanned=[];
 
-document.querySelectorAll("nav button").forEach(button => button.onclick = () => {
-  document.querySelectorAll("nav button,.page").forEach(el => el.classList.remove("active"));
-  button.classList.add("active"); $(`#${button.dataset.page}`).classList.add("active");
-  $("#pageTitle").textContent = button.textContent;
-  if (button.dataset.page === "sms") loadSms();
-});
-
-async function loadPorts() {
-  try {
-    const data = await api("/api/ports");
-    $("#portSelect").innerHTML = data.ports.map(p => `<option ${p === data.selected ? "selected":""}>${escapeHtml(p)}</option>`).join("");
-    $("#stateText").textContent = data.selected ? `已连接 ${data.selected}` : "未发现 EC20";
-    $("#stateDot").classList.toggle("ok", Boolean(data.selected));
-    if (data.selected) loadStatus();
-  } catch (e) { toast(e.message); }
+function renderDevices(){
+  const keyword=$("#searchInput").value.toLowerCase();
+  const shown=devices.filter(d=>JSON.stringify(d).toLowerCase().includes(keyword));
+  $("#deviceList").innerHTML=shown.length?shown.map(d=>`<article class="device-item ${selected?.id===d.id?"active":""}" data-id="${esc(d.id)}"><header><b>${esc(d.name||d.id)}</b><i class="dot ${d.online?"online":""}"></i><span class="badge">${d.online?"在线":"离线"}</span></header><p>${esc(d.id)} · ${esc(d.at_port||"未配置 AT 端口")}</p><p>${esc(d.status?.operator_clean||d.imei||"等待设备...")}</p></article>`).join(""):`<div class="empty-state">暂无设备<br>点击右上角“重新扫描”</div>`;
+  document.querySelectorAll(".device-item").forEach(el=>el.onclick=()=>selectDevice(el.dataset.id));
 }
-async function loadStatus() {
-  try {
-    const data = await api("/api/status");
-    const keys = {model:"设备型号",firmware:"固件版本",imei:"IMEI",sim:"SIM 状态",iccid:"ICCID",operator:"运营商",registration:"网络注册",port:"AT 串口"};
-    $("#statusGrid").innerHTML = Object.entries(keys).map(([key,label]) => `<article class="card"><span>${label}</span><strong>${escapeHtml(data[key] || "--")}</strong></article>`).join("");
-    $("#signalValue").textContent = `${data.signal_percent}%`; $("#signalBar").style.width = `${data.signal_percent}%`;
-  } catch (e) { toast(e.message); }
+function fillForm(device){
+  const form=$("#configForm");
+  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode"].forEach(k=>form.elements[k].value=device[k]|| (k==="mode"?"AT":""));
+  form.elements.network_enabled.checked=Boolean(device.network_enabled);
+  form.elements.vowifi.checked=Boolean(device.vowifi);
 }
-async function loadSms() {
-  $("#smsList").innerHTML = "<p>正在读取短信...</p>";
-  try {
-    const {messages} = await api("/api/sms");
-    $("#smsList").innerHTML = messages.length ? messages.map(m => `<article class="sms-item"><header><strong>${escapeHtml(m.sender)}</strong><button onclick="deleteSms(${m.id})">删除</button></header><small>${escapeHtml(m.time)} · ${escapeHtml(m.status)}</small><p>${escapeHtml(m.text)}</p></article>`).join("") : "<p>SIM 卡内暂无短信。</p>";
-  } catch (e) { $("#smsList").innerHTML = `<p>${escapeHtml(e.message)}</p>`; }
+function showDevice(device){
+  selected=device;renderDevices();fillForm(device);
+  $("#deviceBanner").classList.remove("empty");
+  $("#deviceBanner").innerHTML=`<span class="logo">V</span><div><h2>${esc(device.name||device.id)}</h2><p class="meta"><span>${esc(device.id)}</span><span>AT：${esc(device.at_port||"---")}</span><span>IMEI：${esc(device.status?.imei_clean||device.imei||"---")}</span></p></div>`;
+  const s=device.status||{};
+  const fields={model_clean:"设备型号",firmware:"固件版本",imei_clean:"IMEI",iccid_clean:"ICCID",operator_clean:"运营商",sim:"SIM 状态",registration:"网络注册",signal_percent:"信号强度",at_port:"AT 端口",usb_path:"USB 路径"};
+  $("#overviewGrid").innerHTML=Object.entries(fields).map(([k,label])=>`<div class="info"><span>${label}</span><b>${esc((k==="signal_percent"&&s[k]!==undefined)?`${s[k]}%`:(s[k]??device[k]??"---"))}</b></div>`).join("");
 }
-window.deleteSms = async id => { if (!confirm("删除这条短信？")) return; try { await api("/api/sms/delete",{method:"POST",body:JSON.stringify({id})}); loadSms(); } catch(e){toast(e.message)} };
-$("#refreshPorts").onclick = loadPorts;
-$("#portSelect").onchange = async e => { try { await api("/api/ports/select",{method:"POST",body:JSON.stringify({port:e.target.value})}); toast("串口已切换"); loadStatus(); } catch(err){toast(err.message)} };
-$("#reloadSms").onclick = loadSms;
-$("#smsForm").onsubmit = async e => { e.preventDefault(); $("#smsResult").textContent="正在发送..."; try { const d=await api("/api/sms/send",{method:"POST",body:JSON.stringify({number:$("#smsNumber").value,text:$("#smsText").value})}); $("#smsResult").textContent=d.response; toast("短信已提交发送"); } catch(err){$("#smsResult").textContent=err.message} };
-$("#atForm").onsubmit = async e => { e.preventDefault(); $("#atResult").textContent="执行中..."; try { const d=await api("/api/at",{method:"POST",body:JSON.stringify({command:$("#atInput").value})}); $("#atResult").textContent=d.response; } catch(err){$("#atResult").textContent=err.message} };
-$("#apduForm").onsubmit = async e => { e.preventDefault(); $("#apduResult").textContent="执行中..."; try { const d=await api("/api/estk/apdu",{method:"POST",body:JSON.stringify({apdu:$("#apduInput").value})}); $("#apduResult").textContent=d.response; } catch(err){$("#apduResult").textContent=err.message} };
-loadPorts();
+async function loadDevices(){
+  try{
+    const data=await api("/api/devices");devices=data.devices;
+    const current=devices.find(d=>d.id===(selected?.id||data.selected))||devices[0];
+    renderDevices();if(current)showDevice(current);
+  }catch(e){toast(e.message)}
+}
+async function scan(open=true){
+  try{
+    $("#scanButton").textContent="扫描中...";
+    scanned=(await post("/api/devices/scan",{})).devices;
+    $("#scanResults").innerHTML=scanned.length?scanned.map(d=>`<article class="scan-card" data-id="${esc(d.id)}"><b>${esc(d.name||d.id)}</b><p>AT：${esc(d.at_port)} · IMEI：${esc(d.imei||"未知")}</p><p>USB：${esc(d.usb_path||"未知")}</p></article>`).join(""):`<div class="empty-state">未发现可响应 AT 指令的设备</div>`;
+    document.querySelectorAll(".scan-card").forEach(el=>el.onclick=()=>{const d=scanned.find(x=>x.id===el.dataset.id);showDevice(d);$("#modal").classList.remove("open");switchTab("config")});
+    if(open)$("#modal").classList.add("open");
+  }catch(e){toast(e.message)}finally{$("#scanButton").textContent="◌ 重新扫描"}
+}
+async function selectDevice(id){
+  const device=devices.find(d=>d.id===id);if(!device)return;showDevice(device);
+  if(device.configured)try{await post("/api/devices/select",{id})}catch(e){toast(e.message)}
+}
+function formData(){
+  const f=$("#configForm").elements;return {id:f.id.value,name:f.name.value,imei:f.imei.value,usb_path:f.usb_path.value,network_interface:f.network_interface.value,at_port:f.at_port.value,control_device:f.control_device.value,apn:f.apn.value,mode:f.mode.value,network_enabled:f.network_enabled.checked,vowifi:f.vowifi.checked};
+}
+function switchTab(id){document.querySelectorAll(".tabs button,.tab").forEach(x=>x.classList.remove("active"));document.querySelector(`[data-tab="${id}"]`).classList.add("active");$(`#${id}`).classList.add("active")}
+document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+$("#searchInput").oninput=renderDevices;
+$("#refreshButton").onclick=loadDevices;$("#scanButton").onclick=()=>scan(true);$("#addButton").onclick=()=>scan(true);$("#closeModal").onclick=()=>$("#modal").classList.remove("open");
+$("#saveButton").onclick=async()=>{try{const d=await post("/api/devices/save",formData());toast("设备配置已保存");selected=d.device;await loadDevices()}catch(e){toast(e.message)}};
+$("#deleteButton").onclick=async()=>{if(!selected||!confirm(`删除设备 ${selected.name||selected.id}？`))return;try{await post("/api/devices/delete",{id:selected.id});selected=null;toast("设备已删除");await loadDevices()}catch(e){toast(e.message)}};
+$("#atForm").onsubmit=async e=>{e.preventDefault();$("#atResult").textContent="执行中...";try{$("#atResult").textContent=(await post("/api/at",{command:$("#atInput").value})).response}catch(x){$("#atResult").textContent=x.message}};
+$("#apduForm").onsubmit=async e=>{e.preventDefault();$("#apduResult").textContent="执行中...";try{$("#apduResult").textContent=(await post("/api/estk/apdu",{apdu:$("#apduInput").value})).response}catch(x){$("#apduResult").textContent=x.message}};
+renderDevices();
+loadDevices();

@@ -81,13 +81,28 @@ class EC20Modem:
         return "\n".join(line for line in lines if line and line != command.strip())
 
     def find_at_port(self):
+        ports = self.at_ports()
+        return ports[0] if ports else None
+
+    def at_ports(self):
+        result = []
         for port in self.ports():
             try:
                 if "OK" in self.command(port, "AT", timeout=1):
-                    return port
+                    result.append(port)
             except (EC20Error, OSError, termios.error):
                 continue
-        return None
+        return result
+
+    @staticmethod
+    def usb_path(port):
+        try:
+            resolved = os.path.realpath(port)
+            device = os.path.basename(resolved)
+            path = os.path.realpath(f"/sys/class/tty/{device}/device")
+            return path if path != f"/sys/class/tty/{device}/device" else ""
+        except OSError:
+            return ""
 
     def status(self, port):
         commands = {
@@ -108,7 +123,18 @@ class EC20Modem:
             except Exception as exc:
                 result[key] = f"ERROR: {exc}"
         result["signal_percent"] = self._signal_percent(result["signal"])
+        result["model_clean"] = self._value(result["model"])
+        result["imei_clean"] = self._value(result["imei"])
+        result["iccid_clean"] = self._value(result["iccid"], "+QCCID:")
+        result["operator_clean"] = self._value(result["operator"], "+COPS:")
         return result
+
+    @staticmethod
+    def _value(value, prefix=""):
+        lines = [line.strip() for line in (value or "").splitlines() if line.strip() not in ("OK", "ERROR")]
+        if prefix:
+            lines = [line[len(prefix):].strip() if line.startswith(prefix) else line for line in lines]
+        return lines[0] if lines else ""
 
     @staticmethod
     def _signal_percent(value):
