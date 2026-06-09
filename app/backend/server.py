@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from ec20 import EC20Error, EC20Modem
+from lpac import Lpac
 
 
 APP_DIR = Path(__file__).resolve().parent.parent
@@ -15,6 +16,7 @@ STATIC_DIR = APP_DIR / "static"
 DATA_DIR = Path(os.environ.get("EC20_DATA_DIR", "/opt/ec20-manager/data"))
 CONFIG_FILE = DATA_DIR / "config.json"
 MODEM = EC20Modem()
+LPAC = Lpac()
 
 
 def read_config():
@@ -42,9 +44,14 @@ def scan_devices():
     config = read_config()
     configured = config.setdefault("devices", {})
     discovered = []
+    seen_modems = set()
     for port in MODEM.at_ports():
         existing = next((item for item in configured.values() if MODEM.same_port(item.get("at_port"), port)), None)
         status = MODEM.status(port)
+        identity = status.get("imei_clean") or os.path.realpath(port)
+        if identity in seen_modems:
+            continue
+        seen_modems.add(identity)
         device_id = existing.get("id") if existing else device_id_for_port(port)
         discovered.append({
             "id": device_id,
@@ -141,6 +148,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(MODEM.status(port))
             if path == "/api/sms":
                 return self.send_json({"messages": MODEM.list_sms(port)})
+            if path == "/api/esim":
+                return self.send_json({"info": LPAC.info(port), "profiles": LPAC.profiles(port)})
             return self.send_json({"error": "接口不存在"}, 404)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 503)
@@ -212,7 +221,11 @@ class Handler(SimpleHTTPRequestHandler):
             if not port:
                 raise EC20Error("没有检测到可响应 AT 指令的 EC20 串口")
             if path == "/api/at":
-                return self.send_json({"response": MODEM.command(port, str(data.get("command", "")))})
+                timeout = max(1, min(120, int(data.get("timeout", 10))))
+                return self.send_json({"response": MODEM.command(port, str(data.get("command", "")), timeout=timeout)})
+            if path == "/api/ussd":
+                timeout = max(5, min(120, int(data.get("timeout", 45))))
+                return self.send_json({"response": MODEM.ussd(port, str(data.get("code", "")), timeout)})
             if path == "/api/sms/send":
                 response = MODEM.send_sms(port, str(data.get("number", "")), str(data.get("text", "")))
                 return self.send_json({"ok": True, "response": response})
@@ -221,6 +234,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"ok": True, "response": response})
             if path == "/api/estk/apdu":
                 return self.send_json({"response": MODEM.apdu(port, str(data.get("apdu", "")))})
+            if path == "/api/esim/profile":
+                action = str(data.get("action", ""))
+                if action not in ("enable", "disable", "delete", "nickname"):
+                    raise EC20Error("不支持的 Profile 操作")
+                value = str(data.get("nickname", "")) if action == "nickname" else None
+                return self.send_json({"ok": True, "result": LPAC.profile_action(port, action, str(data.get("iccid", "")), value)})
+            if path == "/api/esim/download":
+                return self.send_json({"ok": True, "result": LPAC.download(port, data)})
             return self.send_json({"error": "接口不存在"}, 404)
         except (ValueError, TypeError, EC20Error) as exc:
             self.send_json({"error": str(exc)}, 400)

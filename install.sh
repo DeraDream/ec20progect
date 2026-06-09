@@ -9,7 +9,7 @@ SOURCE_ARCHIVE_URL="${EC20_SOURCE_ARCHIVE_URL:-https://github.com/DeraDream/ec20
 
 # Keep every required command here. When a feature adds a dependency, update
 # this list and package_for_command() so both installs and upgrades receive it.
-REQUIRED_COMMANDS=(curl tar systemctl python3)
+REQUIRED_COMMANDS=(curl tar unzip systemctl python3)
 
 log() { printf '\033[1;34m[EC20]\033[0m %s\n' "$*" >&2; }
 ok() { printf '\033[1;32m[成功]\033[0m %s\n' "$*" >&2; }
@@ -43,6 +43,7 @@ package_for_command() {
   case "${command_name}" in
     curl) printf 'curl' ;;
     tar) printf 'tar' ;;
+    unzip) printf 'unzip' ;;
     systemctl) printf 'systemd' ;;
     python3) printf 'python3' ;;
     *) printf '%s' "${command_name}" ;;
@@ -93,6 +94,47 @@ ensure_environment() {
       die "${package_name} 安装后检查失败"
   done
   ok "所有运行环境已安装并检查通过"
+}
+
+ensure_lpac() {
+  local machine pattern metadata download_url archive target binary
+  if command -v lpac >/dev/null 2>&1 && lpac --help >/dev/null 2>&1; then
+    ok "lpac 环境检查通过"
+    return
+  fi
+
+  machine="$(uname -m)"
+  case "${machine}" in
+    x86_64|amd64) pattern="linux.*(x86_64|amd64).*\\.zip" ;;
+    aarch64|arm64) pattern="linux.*(aarch64|arm64).*\\.zip" ;;
+    *) die "lpac 暂不支持当前 CPU 架构：${machine}" ;;
+  esac
+  target="${INSTALL_DIR}/tools/lpac"
+  archive="$(mktemp)"
+  metadata="$(mktemp)"
+  mkdir -p "${target}"
+  log "正在获取 lpac 最新版本..."
+  curl --fail --location --retry 3 \
+    --output "${metadata}" "https://api.github.com/repos/estkme-group/lpac/releases/latest"
+  download_url="$(python3 -c 'import json,re,sys; data=json.load(open(sys.argv[1])); pattern=re.compile(sys.argv[2],re.I); print(next((a["browser_download_url"] for a in data.get("assets",[]) if pattern.search(a["name"])),""))' "${metadata}" "${pattern}")"
+  rm -f "${metadata}"
+  [[ -n "${download_url}" ]] || die "未找到匹配当前架构的 lpac Linux 安装包"
+  log "正在安装 lpac..."
+  curl --fail --location --retry 3 --output "${archive}" "${download_url}"
+  rm -rf "${target:?}/"*
+  unzip -q "${archive}" -d "${target}"
+  rm -f "${archive}"
+  binary="$(find "${target}" -type f -name lpac -print -quit)"
+  [[ -n "${binary}" ]] || die "lpac 安装包中未找到可执行文件"
+  chmod 755 "${binary}"
+  cat >"/usr/local/bin/lpac" <<EOF
+#!/usr/bin/env bash
+export LD_LIBRARY_PATH="${target}:\${LD_LIBRARY_PATH:-}"
+exec "${binary}" "\$@"
+EOF
+  chmod 755 /usr/local/bin/lpac
+  lpac --help >/dev/null 2>&1 || die "lpac 安装后检查失败"
+  ok "lpac 安装并检查通过"
 }
 
 find_source_root() {
@@ -183,6 +225,7 @@ deploy_from_source() {
   ensure_environment
 
   mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/backups"
+  ensure_lpac
   rm -rf "${new_app}"
   mkdir -p "${new_app}"
   cp -a "${source_root}/app/." "${new_app}/"

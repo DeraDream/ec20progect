@@ -49,7 +49,7 @@ class EC20Modem:
         termios.tcsetattr(fd, termios.TCSANOW, attrs)
         termios.tcflush(fd, termios.TCIOFLUSH)
 
-    def command(self, port, command, timeout=5, prompt=None, payload=None):
+    def command(self, port, command, timeout=5, prompt=None, payload=None, wait_pattern=None):
         if not port or not any(self.same_port(port, item) for item in self.ports()):
             raise EC20Error("串口不存在或未连接")
         if not command.startswith("AT"):
@@ -60,16 +60,16 @@ class EC20Modem:
             try:
                 self._configure(fd)
                 os.write(fd, (command.strip() + "\r").encode("ascii", "strict"))
-                output = self._read(fd, timeout, prompt)
+                output = self._read(fd, timeout, prompt, wait_pattern)
                 if prompt and prompt in output and payload is not None:
                     os.write(fd, payload + b"\x1a")
-                    output += self._read(fd, timeout, None)
+                    output += self._read(fd, timeout, None, wait_pattern)
                 return self._clean(command, output)
             finally:
                 os.close(fd)
 
     @staticmethod
-    def _read(fd, timeout, prompt):
+    def _read(fd, timeout, prompt, wait_pattern=None):
         deadline = time.monotonic() + timeout
         chunks = []
         while time.monotonic() < deadline:
@@ -83,6 +83,10 @@ class EC20Modem:
             text = b"".join(chunks).decode("utf-8", "replace")
             if prompt and prompt in text:
                 break
+            if wait_pattern and re.search(wait_pattern, text):
+                break
+            if wait_pattern:
+                continue
             if re.search(r"(?:^|\r\n)(OK|ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)\r\n?$", text):
                 break
         return b"".join(chunks).decode("utf-8", "replace")
@@ -127,6 +131,9 @@ class EC20Modem:
             "operator": "AT+COPS?",
             "signal": "AT+CSQ",
             "registration": "AT+CREG?",
+            "imsi": "AT+CIMI",
+            "number": "AT+CNUM",
+            "network_mode": "AT+QNWINFO",
         }
         result = {"port": port, "connected": True}
         for key, command in commands.items():
@@ -139,6 +146,9 @@ class EC20Modem:
         result["imei_clean"] = self._value(result["imei"])
         result["iccid_clean"] = self._value(result["iccid"], "+QCCID:")
         result["operator_clean"] = self._value(result["operator"], "+COPS:")
+        result["imsi_clean"] = self._value(result["imsi"])
+        result["number_clean"] = self._value(result["number"], "+CNUM:")
+        result["network_mode_clean"] = self._value(result["network_mode"], "+QNWINFO:")
         return result
 
     @staticmethod
@@ -214,6 +224,17 @@ class EC20Modem:
         if len(compact) > 1024:
             raise EC20Error("APDU 长度超过首版限制")
         return self.command(port, f'AT+CSIM={len(compact)},"{compact}"', timeout=20)
+
+    def ussd(self, port, code, timeout=45):
+        if not code or len(code) > 100 or '"' in code:
+            raise EC20Error("USSD 代码格式不正确")
+        self.command(port, 'AT+CSCS="GSM"', timeout=2)
+        return self.command(
+            port,
+            f'AT+CUSD=1,"{code}",15',
+            timeout=timeout,
+            wait_pattern=r"(?:^|\r\n)\+CUSD:",
+        )
 
     @staticmethod
     def _decode_ucs2(value):

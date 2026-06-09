@@ -47,18 +47,29 @@
             <button data-tab="config">配置</button>
           </div>
           <div id="overview" class="tab active">
-            <div class="title-row"><div class="section-icon">▯</div><div><h3>设备概览</h3><p>EC20 模组、SIM 卡与蜂窝网络状态</p></div></div>
-            <div id="overviewGrid" class="overview-grid"><div class="empty-state">请先选择设备</div></div>
+            <div id="overviewGrid" class="overview-dashboard"></div>
           </div>
           <div id="esim" class="tab">
-            <div class="title-row"><div class="section-icon">E</div><div><h3>eSTK / eSIM</h3><p>通过 AT+CSIM 与卡片交换 APDU</p></div></div>
-            <form id="apduForm" class="terminal-form"><input id="apduInput" required placeholder="例如 00A4040000"><button>发送 APDU</button><pre id="apduResult">等待指令</pre></form>
+            <div class="title-row"><div class="esim-logo">ESIM</div><div><h3 id="esimName">eSTK / eSIM</h3><p id="esimInfo">通过 lpac 管理 eSTK Profile</p></div><button id="reloadEsim" class="light tab-action">刷新</button></div>
+            <div id="profileList" class="profile-list"><div class="empty-state">点击刷新读取 eSIM 信息</div></div>
+            <form id="downloadForm" class="download-card">
+              <h3>＋ 下载新 Profile</h3>
+              <label class="full">完整激活码（可选）<input name="activation_code" placeholder="LPA:1$SM-DP+地址$Matching ID"></label>
+              <label>SM-DP+ 地址<input name="smdp" placeholder="例如 rsp.truphone.com"></label><label>Matching ID<input name="matching_id" placeholder="可选"></label>
+              <label>确认码<input name="confirmation_code" placeholder="可选"></label><label>IMEI<input name="imei" placeholder="默认使用设备 IMEI"></label>
+              <button>开始下载</button>
+            </form>
           </div>
           <div id="at" class="tab">
             <div class="title-row"><div class="section-icon">AT</div><div><h3>AT 终端</h3><p>向当前设备发送 AT 指令</p></div></div>
-            <form id="atForm" class="terminal-form"><input id="atInput" required value="AT"><button>执行指令</button><pre id="atResult">等待指令</pre></form>
+            <div id="atHistory" class="session-box"><div class="session-empty">暂无 AT 会话记录</div></div>
+            <form id="atForm" class="command-bar"><select id="atTemplate"><option value="">选择常用命令（可选）</option><option>AT</option><option>AT+CSQ</option><option>AT+COPS?</option><option>AT+QNWINFO</option><option>AT+QCCID</option><option>AT+CIMI</option></select><input id="atInput" required placeholder="例如 AT+CSQ（可自由编辑）"><input id="atTimeout" type="number" value="10000"><button type="button" id="clearAt" class="light">清空</button><button>发送</button></form>
           </div>
-          <div id="ussd" class="tab"><div class="empty-state">USSD 终端将在后续版本开放</div></div>
+          <div id="ussd" class="tab">
+            <div class="title-row"><div class="section-icon">▯</div><div><h3>USSD 交互终端</h3><p>发送 USSD 代码并等待网络菜单响应</p></div></div>
+            <div id="ussdHistory" class="session-box"><div class="session-empty">暂无 USSD 会话记录</div></div>
+            <form id="ussdForm" class="command-bar ussd-bar"><input id="ussdInput" required placeholder="例如 *100# 或菜单回复数字"><input id="ussdTimeout" type="number" value="45000"><button type="button" id="clearUssd" class="light">清空</button><button>发送</button></form>
+          </div>
           <div id="config" class="tab">
             <div class="config-head"><div class="title-row"><div class="section-icon">⌁</div><div><h3>设备配置</h3><p>配置保存在数据目录中</p></div></div><div><button id="deleteButton" class="danger">删除设备</button><button id="saveButton">保存配置</button></div></div>
             <form id="configForm" class="config-grid">
