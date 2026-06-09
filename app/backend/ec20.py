@@ -21,7 +21,19 @@ class EC20Modem:
         found = []
         for pattern in patterns:
             found.extend(glob.glob(pattern))
-        return sorted(dict.fromkeys(found))
+        # /dev/serial/by-id/* entries are stable symlinks to ttyUSB/ttyACM
+        # nodes. Keep one display path per physical serial endpoint.
+        unique = {}
+        for port in found:
+            real_port = os.path.realpath(port)
+            current = unique.get(real_port)
+            if current is None or ("/dev/serial/by-id/" in port and "/dev/serial/by-id/" not in current):
+                unique[real_port] = port
+        return sorted(unique.values())
+
+    @classmethod
+    def same_port(cls, first, second):
+        return bool(first and second and os.path.realpath(first) == os.path.realpath(second))
 
     @staticmethod
     def _configure(fd):
@@ -38,7 +50,7 @@ class EC20Modem:
         termios.tcflush(fd, termios.TCIOFLUSH)
 
     def command(self, port, command, timeout=5, prompt=None, payload=None):
-        if not port or port not in self.ports():
+        if not port or not any(self.same_port(port, item) for item in self.ports()):
             raise EC20Error("串口不存在或未连接")
         if not command.startswith("AT"):
             raise EC20Error("只允许执行 AT 指令")

@@ -43,7 +43,7 @@ def scan_devices():
     configured = config.setdefault("devices", {})
     discovered = []
     for port in MODEM.at_ports():
-        existing = next((item for item in configured.values() if item.get("at_port") == port), None)
+        existing = next((item for item in configured.values() if MODEM.same_port(item.get("at_port"), port)), None)
         status = MODEM.status(port)
         device_id = existing.get("id") if existing else device_id_for_port(port)
         discovered.append({
@@ -73,7 +73,7 @@ def all_devices():
     for device_id, device in configured.items():
         merged = dict(device)
         merged.update(discovered.pop(device_id, {}))
-        merged["online"] = bool(merged.get("at_port") in MODEM.ports() and merged.get("status"))
+        merged["online"] = bool(any(MODEM.same_port(merged.get("at_port"), port) for port in MODEM.ports()) and merged.get("status"))
         merged["configured"] = True
         result.append(merged)
     return result
@@ -83,10 +83,10 @@ def selected_port():
     config = read_config()
     selected_id = config.get("selected_device")
     selected = config.get("devices", {}).get(selected_id, {})
-    if selected.get("at_port") in MODEM.ports():
+    if any(MODEM.same_port(selected.get("at_port"), item) for item in MODEM.ports()):
         return selected["at_port"]
     port = config.get("port")
-    if port in MODEM.ports():
+    if any(MODEM.same_port(port, item) for item in MODEM.ports()):
         return port
     port = MODEM.find_at_port()
     if port:
@@ -156,7 +156,7 @@ class Handler(SimpleHTTPRequestHandler):
                 port = str(data.get("at_port", ""))
                 if not device_id:
                     raise EC20Error("设备 ID 不能为空")
-                if port not in MODEM.ports():
+                if not any(MODEM.same_port(port, item) for item in MODEM.ports()):
                     raise EC20Error("AT 端口不存在")
                 if "OK" not in MODEM.command(port, "AT", timeout=2):
                     raise EC20Error("AT 端口未响应")
@@ -199,7 +199,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"ok": True})
             if path == "/api/ports/select":
                 port = data.get("port")
-                if port not in MODEM.ports():
+                if not any(MODEM.same_port(port, item) for item in MODEM.ports()):
                     raise EC20Error("串口不存在")
                 if "OK" not in MODEM.command(port, "AT", timeout=2):
                     raise EC20Error("该串口未响应 AT 指令")
