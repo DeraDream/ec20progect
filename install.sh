@@ -5,7 +5,7 @@ PROJECT_NAME="ec20-manager"
 INSTALL_DIR="${EC20_INSTALL_DIR:-/opt/${PROJECT_NAME}}"
 BIN_PATH="${EC20_BIN_PATH:-/usr/local/bin/ec20}"
 SERVICE_NAME="${PROJECT_NAME}.service"
-SOURCE_ARCHIVE_URL="${EC20_SOURCE_ARCHIVE_URL:-https://github.com/OWNER/ec20-manager/archive/refs/heads/main.tar.gz}"
+SOURCE_ARCHIVE_URL="${EC20_SOURCE_ARCHIVE_URL:-https://github.com/DeraDream/ec20progect/archive/refs/heads/main.tar.gz}"
 
 # Keep every required command here. When a feature adds a dependency, update
 # this list and package_for_command() so both installs and upgrades receive it.
@@ -117,9 +117,6 @@ download_source() {
     printf '%s' "${EC20_SOURCE_DIR}"
     return
   fi
-
-  [[ "${SOURCE_ARCHIVE_URL}" != *"OWNER/"* ]] ||
-    die "尚未配置源码地址，请设置 EC20_SOURCE_ARCHIVE_URL 后重试"
 
   log "正在下载最新版..."
   curl --fail --location --retry 3 --connect-timeout 15 \

@@ -16,11 +16,10 @@ http://服务器IP:7571
 
 ## 一键运行
 
-将仓库发布到服务器后，把 `install.sh` 中的 `SOURCE_ARCHIVE_URL` 改为实际
-源码压缩包地址。用户可执行：
+使用以下命令直接从 GitHub 安装：
 
 ```bash
-curl -fsSL https://your-server.example/install.sh | sudo bash -s -- --install
+curl -fsSL https://raw.githubusercontent.com/DeraDream/ec20progect/main/install.sh | sudo bash -s -- --install
 ```
 
 安装成功后，随时执行以下命令唤起菜单：
@@ -52,8 +51,8 @@ sudo ec20
 ## 发布与环境依赖
 
 - 源码压缩包必须包含根目录下的 `install.sh` 和 `app/`。
-- 发布前必须配置 `SOURCE_ARCHIVE_URL`，也可在运行时设置
-  `EC20_SOURCE_ARCHIVE_URL`。
+- 默认从 `DeraDream/ec20progect` 的 `main` 分支下载最新版。
+- 如需使用镜像或私有源码包，可设置 `EC20_SOURCE_ARCHIVE_URL`。
 - 新功能需要额外环境时，必须同时更新 `install.sh` 中的
   `REQUIRED_COMMANDS` 和 `package_for_command()`。
 - 更新流程会先执行新版本安装器的环境检查，再替换应用文件。
