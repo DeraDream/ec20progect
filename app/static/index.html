@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EC20 Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <aside>
+    <div class="brand"><span>EC</span><strong>EC20 Console</strong></div>
+    <nav>
+      <button class="active" data-page="dashboard">总览</button>
+      <button data-page="sms">短信</button>
+      <button data-page="estk">eSTK</button>
+      <button data-page="terminal">AT 终端</button>
+    </nav>
+    <div class="device-state"><i id="stateDot"></i><span id="stateText">正在检测设备</span></div>
+  </aside>
+  <main>
+    <header>
+      <div><small>设备管理中心</small><h1 id="pageTitle">总览</h1></div>
+      <div class="port-picker"><select id="portSelect"></select><button id="refreshPorts">重新检测</button></div>
+    </header>
+
+    <section id="dashboard" class="page active">
+      <div class="hero">
+        <div><span class="eyebrow">QUECTEL EC20</span><h2>蜂窝连接，一眼掌握</h2><p>USB 串口状态、SIM 信息和网络信号实时显示。</p></div>
+        <div class="signal"><strong id="signalValue">--</strong><span>信号强度</span><div><i id="signalBar"></i></div></div>
+      </div>
+      <div id="statusGrid" class="grid"></div>
+    </section>
+
+    <section id="sms" class="page">
+      <div class="section-head"><div><h2>短信中心</h2><p>读取 SIM 卡短信，并从 EC20 直接发送。</p></div><button id="reloadSms">刷新短信</button></div>
+      <div class="split">
+        <div class="panel"><h3>收件箱</h3><div id="smsList" class="sms-list"></div></div>
+        <form id="smsForm" class="panel compose"><h3>发送短信</h3><label>接收号码<input id="smsNumber" required placeholder="+8613800138000"></label><label>短信内容<textarea id="smsText" required maxlength="500" placeholder="输入短信内容"></textarea></label><button type="submit">发送短信</button><pre id="smsResult"></pre></form>
+      </div>
+    </section>
+
+    <section id="estk" class="page">
+      <div class="section-head"><div><h2>eSTK 工具</h2><p>通过 EC20 的 AT+CSIM 通道与 eSTK 卡交换 APDU。</p></div><span class="tag">底层通道</span></div>
+      <form id="apduForm" class="panel terminal"><label>APDU 十六进制指令<input id="apduInput" required placeholder="00A4040000"></label><button type="submit">发送 APDU</button><pre id="apduResult">等待指令</pre></form>
+      <div class="notice">配置文件下载、启用和切换需要继续接入 LPA。本页目前用于确认 eSTK 卡通信和调试 APDU。</div>
+    </section>
+
+    <section id="terminal" class="page">
+      <div class="section-head"><div><h2>AT 终端</h2><p>直接向当前选中的 EC20 串口发送 AT 指令。</p></div></div>
+      <form id="atForm" class="panel terminal"><label>AT 指令<input id="atInput" required value="AT"></label><button type="submit">执行</button><pre id="atResult">等待指令</pre></form>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

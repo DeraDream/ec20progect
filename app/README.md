@@ -1,0 +1,14 @@
+# EC20 Manager Application
+
+首版应用提供：
+
+- 自动探测 `/dev/ttyUSB*`、`/dev/ttyACM*` 和 `/dev/serial/by-id/*`
+- EC20 型号、IMEI、ICCID、运营商、信号及注册状态
+- SIM 卡短信读取、发送和删除，支持 UCS2 中文短信
+- 自定义 AT 指令终端
+- 通过 `AT+CSIM` 发送 eSTK APDU
+- 中文响应式 Web 管理页面
+
+服务默认监听 `0.0.0.0:7571`。持久配置写入 `/opt/ec20-manager/data`，
+升级时不会删除该目录。API 使用安装时生成的访问令牌进行认证，令牌保存在
+`/opt/ec20-manager/data/web.env`。
