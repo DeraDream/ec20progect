@@ -190,13 +190,13 @@ install_or_update() {
   local work_dir source_root
   ensure_environment
   work_dir="$(mktemp -d)"
-  trap 'rm -rf "${work_dir}"' RETURN
   source_root="$(download_source "${work_dir}")"
 
   # Run the downloaded installer's deployment path so a new release can add
   # environment requirements before its application files are activated.
   EC20_INSTALL_DIR="${INSTALL_DIR}" EC20_BIN_PATH="${BIN_PATH}" \
     bash "${source_root}/install.sh" --deploy-from "${source_root}" "${mode}"
+  rm -rf "${work_dir}"
 }
 
 uninstall_project() {
