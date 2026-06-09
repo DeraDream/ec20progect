@@ -97,10 +97,14 @@ ensure_environment() {
 }
 
 ensure_lpac() {
-  local machine pattern metadata download_url archive target binary
-  if command -v lpac >/dev/null 2>&1 && lpac --help >/dev/null 2>&1; then
-    ok "lpac 环境检查通过"
-    return
+  local machine pattern metadata download_url archive target binary library_path check_output
+  if command -v lpac >/dev/null 2>&1 && [[ -x "$(command -v lpac)" ]]; then
+    check_output="$(lpac --help 2>&1 || true)"
+    if [[ -n "${check_output}" && "${check_output}" != *"error while loading shared libraries"* ]]; then
+      ok "lpac 环境检查通过"
+      return
+    fi
+    warn "现有 lpac 无法正常启动，将重新安装"
   fi
 
   machine="$(uname -m)"
@@ -127,13 +131,26 @@ ensure_lpac() {
   binary="$(find "${target}" -type f -name lpac -print -quit)"
   [[ -n "${binary}" ]] || die "lpac 安装包中未找到可执行文件"
   chmod 755 "${binary}"
+  library_path="$(find "${target}" -type f -name '*.so*' -printf '%h\n' |
+    sort -u | paste -sd: -)"
   cat >"/usr/local/bin/lpac" <<EOF
 #!/usr/bin/env bash
-export LD_LIBRARY_PATH="${target}:\${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${library_path:-${target}}:\${LD_LIBRARY_PATH:-}"
 exec "${binary}" "\$@"
 EOF
   chmod 755 /usr/local/bin/lpac
-  lpac --help >/dev/null 2>&1 || die "lpac 安装后检查失败"
+  if command -v ldd >/dev/null 2>&1; then
+    check_output="$(LD_LIBRARY_PATH="${library_path:-${target}}" ldd "${binary}" 2>&1 || true)"
+    if grep -q 'not found' <<<"${check_output}"; then
+      printf '%s\n' "${check_output}" >&2
+      die "lpac 缺少动态库，请查看以上检查结果"
+    fi
+  fi
+  check_output="$(lpac --help 2>&1 || true)"
+  [[ "${check_output}" != *"error while loading shared libraries"* ]] || {
+    printf '%s\n' "${check_output}" >&2
+    die "lpac 动态库加载失败"
+  }
   ok "lpac 安装并检查通过"
 }
 
