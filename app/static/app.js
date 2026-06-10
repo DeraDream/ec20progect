@@ -120,14 +120,17 @@ function normalizedProfile(profile){
     enabled,
   };
 }
-function renderEsimSummary(info,profiles,capability={}){
+function renderEsimSummary(info,profiles,capability={},profilesError=""){
   const eid=deepValue(info,["eid"])||"未提供";
   const name=deepValue(info,["applicationname","application_name"])||"eSTK / eSIM";
   const enabled=profiles.filter(p=>p.enabled).length;
   $("#esimName").textContent=name;
   const backend=String(capability.backend||"").toUpperCase();
   $("#esimInfo").textContent=eid==="未提供"?`通过 ${backend||"自动"} 后端管理 eSIM`:`EID ${eid} · ${backend||"AUTO"}`;
-  $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profiles.length} 个</b></article><article><span>已启用</span><b>${enabled} 个</b></article><article><span>eUICC 状态</span><b>${profiles.length?"可用":"未安装 Profile"}</b></article>`;
+  const profileCount=profilesError?"读取失败":`${profiles.length} 个`;
+  const enabledCount=profilesError?"--":`${enabled} 个`;
+  const status=profilesError?"已连接":profiles.length?"可用":"未安装 Profile";
+  $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profileCount}</b></article><article><span>已启用</span><b>${enabledCount}</b></article><article><span>eUICC 状态</span><b>${status}</b></article>`;
 }
 async function loadEsim(){
   if(!selected||esimLoading)return;
@@ -139,8 +142,12 @@ async function loadEsim(){
     $("#esimInfo").textContent=`${esimDiagnostic.configured} → ${esimDiagnostic.selected} · ${esimDiagnostic.reason}`;
     const d=await api("/api/esim",{timeout:60000});
     const profiles=profileItems(d.profiles).map(normalizedProfile);
-    renderEsimSummary(d.info||{},profiles,d.capability||{});
-    $("#profileList").innerHTML=profiles.length?profiles.map(profileCard).join(""):`<div class="empty-state">eUICC 已连接，但未发现 Profile<br>可在下方输入激活码下载</div>`;
+    renderEsimSummary(d.info||{},profiles,d.capability||{},d.profiles_error||"");
+    if(d.profiles_error){
+      $("#profileList").innerHTML=`<div class="esim-warning"><b>eUICC 已连接，但 Profile 列表读取失败</b><span>${esc(d.profiles_error)}</span><small>基础信息已正常显示；可刷新重试，或继续检查当前 eSIM 通道。</small></div>`;
+    }else{
+      $("#profileList").innerHTML=profiles.length?profiles.map(profileCard).join(""):`<div class="empty-state">eUICC 已连接，但未发现 Profile<br>可在下方输入激活码下载</div>`;
+    }
   }catch(e){
     $("#esimInfo").textContent=esimDiagnostic?`${esimDiagnostic.configured} → ${esimDiagnostic.selected} · 读取失败`:"eSIM 读取失败";
     $("#esimSummary").innerHTML=`<article><span>EID</span><b>读取失败</b></article><article><span>Profile</span><b>--</b></article><article><span>已启用</span><b>--</b></article><article><span>eUICC 状态</span><b>异常</b></article>`;

@@ -68,6 +68,26 @@ class ServerEsimTransportTest(unittest.TestCase):
         with self.assertRaisesRegex(EC20Error, "ttyUSB2: 超时.*ttyUSB0: 超时"):
             server.selected_esim_transport()
 
+    @patch.object(server.LPAC, "profiles", side_effect=EC20Error("Profile 超时"))
+    @patch.object(server, "ensure_esim_port_available")
+    @patch.object(
+        server,
+        "selected_esim_transport",
+        return_value=(
+            "/dev/ttyUSB0",
+            {"supported": True, "backend": "at", "probe_info": {"eid": "123"}},
+            {"backend": "at"},
+        ),
+    )
+    def test_read_esim_keeps_chip_info_when_profiles_fail(self, selected_transport, ensure_available, profiles):
+        result = server.read_esim()
+
+        self.assertEqual(result["info"], {"eid": "123"})
+        self.assertEqual(result["profiles"], [])
+        self.assertEqual(result["profiles_error"], "Profile 超时")
+        self.assertNotIn("probe_info", result["capability"])
+        profiles.assert_called_once_with("/dev/ttyUSB0", timeout=10, backend="at")
+
 
 if __name__ == "__main__":
     unittest.main()

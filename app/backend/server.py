@@ -222,6 +222,26 @@ def ensure_esim_port_available(port):
         raise EC20Error(f"eSIM AT 端口正被其他程序占用：{processes}。请停止该程序后重试")
 
 
+def read_esim():
+    esim_port, capability, transport = selected_esim_transport()
+    if transport["backend"] == "at":
+        ensure_esim_port_available(esim_port)
+    info = capability.pop("probe_info", None) or LPAC.info(esim_port, **transport)
+    try:
+        profiles = LPAC.profiles(esim_port, timeout=10, **transport)
+        profiles_error = ""
+    except EC20Error as exc:
+        profiles = []
+        profiles_error = str(exc)
+    return {
+        "info": info,
+        "profiles": profiles,
+        "profiles_error": profiles_error,
+        "capability": capability,
+        "port": esim_port,
+    }
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -272,12 +292,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"messages": MODEM.list_sms(port)})
             if path == "/api/esim":
                 with esim_operation():
-                    esim_port, capability, transport = selected_esim_transport()
-                    if transport["backend"] == "at":
-                        ensure_esim_port_available(esim_port)
-                    info = capability.pop("probe_info", None) or LPAC.info(esim_port, **transport)
-                    profiles = LPAC.profiles(esim_port, **transport)
-                return self.send_json({"info": info, "profiles": profiles, "capability": capability, "port": esim_port})
+                    result = read_esim()
+                return self.send_json(result)
             return self.send_json({"error": "接口不存在"}, 404)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 503)
