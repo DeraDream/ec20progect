@@ -48,6 +48,30 @@ def devices_config():
     return config.setdefault("devices", {})
 
 
+def ordered_esim_ports(ports, configured_port="", status_port=""):
+    def priority(port):
+        if configured_port and MODEM.same_port(port, configured_port):
+            return (0, 0, port)
+        real_name = Path(os.path.realpath(port)).name
+        if "if03-port0" in port or real_name == "ttyUSB3":
+            return (1, 0, port)
+        if status_port and MODEM.same_port(port, status_port):
+            return (2, 0, port)
+        match = re.search(r"(\d+)$", real_name)
+        return (3, int(match.group(1)) if match else 999, port)
+
+    return sorted(dict.fromkeys(ports), key=priority)
+
+
+def default_esim_port(status_port):
+    candidates = ordered_esim_ports(MODEM.sibling_at_ports(status_port), status_port=status_port)
+    if candidates:
+        real_name = Path(os.path.realpath(candidates[0])).name
+        if "if03-port0" in candidates[0] or real_name == "ttyUSB3":
+            return candidates[0]
+    return ""
+
+
 def scan_devices():
     config = read_config()
     configured = config.setdefault("devices", {})
@@ -69,6 +93,7 @@ def scan_devices():
             "usb_path": MODEM.usb_path(port),
             "network_interface": (existing or {}).get("network_interface", ""),
             "control_device": (existing or {}).get("control_device", ""),
+            "esim_at_port": (existing or {}).get("esim_at_port") or default_esim_port(port),
             "esim_backend": (existing or {}).get("esim_backend", "AUTO"),
             "apn": (existing or {}).get("apn", ""),
             "mode": (existing or {}).get("mode", "AT"),
@@ -146,11 +171,17 @@ def remember_at_backend(port, backend):
 
 
 def selected_esim_transport():
-    port = selected_port()
-    if not port:
+    status_port = selected_port()
+    if not status_port:
         raise EC20Error("没有检测到可响应 AT 指令的 EC20 串口")
     device = selected_device()
+    configured_esim_port = str(device.get("esim_at_port", "")).strip()
+    if configured_esim_port and not any(MODEM.same_port(configured_esim_port, item) for item in MODEM.ports()):
+        RUNTIME_LOG.write("esim", f"Configured eSIM AT port is unavailable: {configured_esim_port}", "WARN")
+        configured_esim_port = ""
+    port = configured_esim_port or status_port
     backend = str(device.get("esim_backend", "AUTO")).upper()
+    RUNTIME_LOG.write("esim", f"status AT={status_port}, preferred eSIM AT={port}, backend={backend}")
     RUNTIME_LOG.write("esim", f"选择 eSIM 通道：配置={backend}，首选端口={port}")
     control_device = str(device.get("control_device", "")).strip()
     control_devices = MODEM.control_devices()
@@ -165,7 +196,10 @@ def selected_esim_transport():
         }
     if backend == "QRTR" or (backend == "AUTO" and MODEM.qrtr_available()):
         return port, {"supported": True, "backend": "qmi_qrtr"}, {"backend": "qmi_qrtr"}
-    candidates = MODEM.sibling_at_ports(port) or [port]
+    candidates = MODEM.sibling_at_ports(port) or MODEM.sibling_at_ports(status_port) or [port]
+    if configured_esim_port and not any(MODEM.same_port(configured_esim_port, item) for item in candidates):
+        candidates.insert(0, configured_esim_port)
+    candidates = ordered_esim_ports(candidates, configured_esim_port, status_port)
     RUNTIME_LOG.write("esim", f"系统全部串口：{', '.join(MODEM.ports())}")
     RUNTIME_LOG.write("esim", f"同一 USB 设备串口候选：{', '.join(candidates)}")
     capable = []
@@ -237,6 +271,7 @@ def selected_esim_transport():
 def esim_diagnostics():
     device = selected_device()
     configured = str(device.get("esim_backend", "AUTO")).upper()
+    configured_at = str(device.get("esim_at_port", "")).strip()
     configured_control = str(device.get("control_device", "")).strip()
     controls = MODEM.control_devices()
     qrtr = MODEM.qrtr_available()
@@ -265,6 +300,7 @@ def esim_diagnostics():
         "configured": configured,
         "selected": selected,
         "reason": reason,
+        "esim_at_port": configured_at,
         "control_devices": controls,
         "qrtr": qrtr,
     }
@@ -461,12 +497,20 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/devices/save":
                 device_id = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(data.get("id", "")).strip())
                 port = str(data.get("at_port", ""))
+                esim_at_port = str(data.get("esim_at_port", "")).strip()
                 if not device_id:
                     raise EC20Error("设备 ID 不能为空")
                 if not any(MODEM.same_port(port, item) for item in MODEM.ports()):
                     raise EC20Error("AT 端口不存在")
                 if "OK" not in MODEM.command(port, "AT", timeout=2):
                     raise EC20Error("AT 端口未响应")
+                if esim_at_port and not any(MODEM.same_port(esim_at_port, item) for item in MODEM.ports()):
+                    raise EC20Error("eSIM AT port does not exist")
+                if esim_at_port:
+                    status_usb = MODEM.usb_device_path(port)
+                    esim_usb = MODEM.usb_device_path(esim_at_port)
+                    if status_usb and esim_usb and status_usb != esim_usb:
+                        raise EC20Error("eSIM AT port must belong to the same USB modem")
                 config = read_config()
                 device = {
                     "id": device_id,
@@ -475,6 +519,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "usb_path": str(data.get("usb_path", "")).strip(),
                     "network_interface": str(data.get("network_interface", "")).strip(),
                     "at_port": port,
+                    "esim_at_port": esim_at_port or default_esim_port(port),
                     "control_device": str(data.get("control_device", "")).strip(),
                     "esim_backend": str(data.get("esim_backend", "AUTO")).upper(),
                     "apn": str(data.get("apn", "")).strip(),

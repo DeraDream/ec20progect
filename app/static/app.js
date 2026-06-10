@@ -28,7 +28,7 @@ function renderDevices(){
 }
 function fillForm(device){
   const form=$("#configForm");
-  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode","esim_backend"].forEach(k=>form.elements[k].value=device[k]|| (k==="mode"?"AT":k==="esim_backend"?"AUTO":""));
+  ["id","name","imei","usb_path","network_interface","at_port","esim_at_port","control_device","apn","mode","esim_backend"].forEach(k=>form.elements[k].value=device[k]|| (k==="mode"?"AT":k==="esim_backend"?"AUTO":""));
   form.elements.network_enabled.checked=Boolean(device.network_enabled);
   form.elements.vowifi.checked=Boolean(device.vowifi);
 }
@@ -70,11 +70,11 @@ function chooseScanned(element,device){
   fillNamedForm($("#addForm"),device);$("#addConfig").classList.remove("hidden");
 }
 function fillNamedForm(form,device){
-  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode","esim_backend"].forEach(k=>form.elements[k].value=device[k]||(k==="mode"?"AT":k==="esim_backend"?"AUTO":""));
+  ["id","name","imei","usb_path","network_interface","at_port","esim_at_port","control_device","apn","mode","esim_backend"].forEach(k=>form.elements[k].value=device[k]||(k==="mode"?"AT":k==="esim_backend"?"AUTO":""));
   form.elements.network_enabled.checked=Boolean(device.network_enabled);form.elements.vowifi.checked=Boolean(device.vowifi);
 }
 function formData(form=$("#configForm")){
-  const f=form.elements;return {id:f.id.value,name:f.name.value,imei:f.imei.value,usb_path:f.usb_path.value,network_interface:f.network_interface.value,at_port:f.at_port.value,control_device:f.control_device.value,apn:f.apn.value,mode:f.mode.value,esim_backend:f.esim_backend.value,network_enabled:f.network_enabled.checked,vowifi:f.vowifi.checked};
+  const f=form.elements;return {id:f.id.value,name:f.name.value,imei:f.imei.value,usb_path:f.usb_path.value,network_interface:f.network_interface.value,at_port:f.at_port.value,esim_at_port:f.esim_at_port.value,control_device:f.control_device.value,apn:f.apn.value,mode:f.mode.value,esim_backend:f.esim_backend.value,network_enabled:f.network_enabled.checked,vowifi:f.vowifi.checked};
 }
 function switchTab(id){document.querySelectorAll(".tabs button,.tab").forEach(x=>x.classList.remove("active"));document.querySelector(`[data-tab="${id}"]`).classList.add("active");$(`#${id}`).classList.add("active");if(id==="esim")loadEsim();if(id==="logs")startLogs();else stopLogs()}
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
