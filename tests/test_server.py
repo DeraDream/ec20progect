@@ -13,6 +13,7 @@ import server  # noqa: E402
 class ServerEsimTransportTest(unittest.TestCase):
     def setUp(self):
         self.capability = {"supported": True, "unsupported": [], "responses": {}}
+        server.RUNTIME_LOG.path = None
 
     @patch.object(server.LPAC, "info")
     @patch.object(server, "ensure_esim_port_available")

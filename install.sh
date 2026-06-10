@@ -257,7 +257,8 @@ install_service_if_present() {
     return
   fi
 
-  python3 -m py_compile "${INSTALL_DIR}/app/backend/ec20.py" "${INSTALL_DIR}/app/backend/server.py" ||
+  python3 -m py_compile "${INSTALL_DIR}/app/backend/ec20.py" "${INSTALL_DIR}/app/backend/lpac.py" \
+    "${INSTALL_DIR}/app/backend/runtime_log.py" "${INSTALL_DIR}/app/backend/server.py" ||
     die "后端 Python 语法检查失败"
   install -m 644 "${service_source}" "/etc/systemd/system/${SERVICE_NAME}"
   systemctl daemon-reload
@@ -357,11 +358,19 @@ uninstall_project() {
   fi
 }
 
+show_logs() {
+  local log_file="${INSTALL_DIR}/logs/ec20-manager.log"
+  mkdir -p "$(dirname "${log_file}")"
+  touch "${log_file}"
+  printf '实时日志：%s（按 Ctrl+C 退出）\n' "${log_file}"
+  tail -n 200 -f "${log_file}"
+}
+
 show_menu() {
   while true; do
     printf '\n========== EC20 管理菜单 ==========\n'
-    printf '1. 安装脚本\n2. 更新脚本\n3. 卸载脚本\n4. 退出\n'
-    read -r -p "请选择 [1-4]：" choice
+    printf '1. 安装脚本\n2. 更新脚本\n3. 卸载脚本\n4. 查看实时日志\n5. 退出\n'
+    read -r -p "请选择 [1-5]：" choice
     case "${choice}" in
       1) install_or_update install ;;
       2)
@@ -369,8 +378,9 @@ show_menu() {
         install_or_update update
         ;;
       3) uninstall_project ;;
-      4) exit 0 ;;
-      *) warn "请输入 1、2、3 或 4" ;;
+      4) show_logs ;;
+      5) exit 0 ;;
+      *) warn "请输入 1、2、3、4 或 5" ;;
     esac
   done
 }
@@ -385,6 +395,7 @@ main() {
     --install) install_or_update install ;;
     --update) install_or_update update ;;
     --uninstall) uninstall_project ;;
+    --logs) show_logs ;;
     "") show_menu ;;
     *) die "未知参数：$1" ;;
   esac

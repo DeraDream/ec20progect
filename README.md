@@ -27,6 +27,14 @@ curl -fsSL https://raw.githubusercontent.com/DeraDream/ec20progect/main/install.
 sudo ec20
 ```
 
+实时查看服务、eSIM 与 lpac 日志：
+
+```bash
+sudo ec20 --logs
+```
+
+日志文件位于 `/opt/ec20-manager/logs/ec20-manager.log`，Web 设备页面也提供只读“实时日志”终端。
+
 菜单功能：
 
 1. 安装脚本

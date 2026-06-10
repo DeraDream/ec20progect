@@ -1,11 +1,13 @@
 import json
 import os
 import subprocess
+import threading
 
 from ec20 import EC20Error
 
 
 class Lpac:
+    logger = None
     LOAD_ERRORS = (
         "error while loading shared libraries",
         "symbol lookup error",
@@ -65,29 +67,47 @@ class Lpac:
             env["LPAC_APDU_QMI_UIM_SLOT"] = "1"
         if backend == "qmi":
             env["LPAC_APDU_QMI_DEVICE"] = control_device
+        command = ["lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac", *args]
+        operation = " ".join(args[:2])
+        Lpac._log(f"开始 {operation}，后端={backend}，端口={port}，超时={timeout}s")
         try:
-            process = subprocess.run(
-                ["lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac", *args],
-                capture_output=True,
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
+                encoding="utf-8",
+                errors="replace",
                 env=env,
-                check=False,
+                bufsize=1,
             )
         except FileNotFoundError as exc:
             name = "lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac"
             raise EC20Error(f"系统未安装 {name}，请执行 ec20 更新") from exc
+        stdout_lines = []
+        stderr_lines = []
+        readers = [
+            threading.Thread(target=Lpac._read_stream, args=(process.stdout, stdout_lines, "stdout"), daemon=True),
+            threading.Thread(target=Lpac._read_stream, args=(process.stderr, stderr_lines, "stderr"), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+        try:
+            process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            partial = "\n".join(
-                value.decode("utf-8", "replace") if isinstance(value, bytes) else value
-                for value in (exc.stdout, exc.stderr)
-                if value
-            )
+            process.kill()
+            process.wait()
+            for reader in readers:
+                reader.join(timeout=2)
+            partial = "\n".join(stdout_lines + stderr_lines)
+            Lpac._log(f"{operation} 超时：{Lpac._timeout_detail(partial)}", "ERROR")
             raise EC20Error(
                 f"lpac 在 {timeout} 秒内超时：{Lpac._timeout_detail(partial)}"
             ) from exc
-        stdout = process.stdout.strip()
-        stderr = process.stderr.strip()
+        for reader in readers:
+            reader.join(timeout=2)
+        stdout = "\n".join(stdout_lines).strip()
+        stderr = "\n".join(stderr_lines).strip()
         output = stdout or stderr
         try:
             result = Lpac._json_result(stdout)
@@ -96,7 +116,24 @@ class Lpac:
         payload = result.get("payload", {})
         if process.returncode != 0 or payload.get("code", 0) != 0:
             raise EC20Error(payload.get("message") or Lpac._friendly_error(stderr or output, process.returncode))
+        Lpac._log(f"完成 {operation}")
         return payload.get("data", {})
+
+    @staticmethod
+    def _read_stream(stream, output, stream_name):
+        if not stream:
+            return
+        for line in iter(stream.readline, ""):
+            clean = line.rstrip("\r\n")
+            output.append(clean)
+            if clean:
+                Lpac._log(clean, "DEBUG", f"lpac/{stream_name}")
+        stream.close()
+
+    @staticmethod
+    def _log(message, level="INFO", source="lpac"):
+        if Lpac.logger:
+            Lpac.logger(source, message, level)
 
     def info(self, port, timeout=20, **transport):
         return self.run(port, "chip", "info", timeout=timeout, **transport)

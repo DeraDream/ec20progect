@@ -7,18 +7,22 @@ import traceback
 from contextlib import contextmanager
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from ec20 import EC20Error, EC20Modem
 from lpac import Lpac
+from runtime_log import RuntimeLog
 
 
 APP_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = APP_DIR / "static"
 DATA_DIR = Path(os.environ.get("EC20_DATA_DIR", "/opt/ec20-manager/data"))
+LOG_DIR = Path(os.environ.get("EC20_LOG_DIR", "/opt/ec20-manager/logs"))
 CONFIG_FILE = DATA_DIR / "config.json"
+RUNTIME_LOG = RuntimeLog(LOG_DIR / "ec20-manager.log")
 MODEM = EC20Modem()
 LPAC = Lpac()
+LPAC.logger = RUNTIME_LOG.write
 ESIM_LOCK = threading.Lock()
 
 
@@ -117,6 +121,7 @@ def selected_esim_transport():
         raise EC20Error("没有检测到可响应 AT 指令的 EC20 串口")
     device = selected_device()
     backend = str(device.get("esim_backend", "AUTO")).upper()
+    RUNTIME_LOG.write("esim", f"选择 eSIM 通道：配置={backend}，首选端口={port}")
     control_device = str(device.get("control_device", "")).strip()
     control_devices = MODEM.control_devices()
     if not control_device and len(control_devices) == 1:
@@ -149,6 +154,7 @@ def selected_esim_transport():
     failures = []
     for candidate, capability in capable:
         try:
+            RUNTIME_LOG.write("esim", f"探测 AT eSIM 端口 {candidate}")
             ensure_esim_port_available(candidate)
             probe_info = LPAC.info(candidate, timeout=7, backend="at")
             capability["backend"] = "at"
@@ -160,6 +166,7 @@ def selected_esim_transport():
             )
             return candidate, capability, {"backend": "at"}
         except EC20Error as exc:
+            RUNTIME_LOG.write("esim", f"AT eSIM 端口 {candidate} 探测失败：{exc}", "WARN")
             failures.append(f"{Path(candidate).name}: {exc}")
     detail = "；".join(failures)
     raise EC20Error(
@@ -227,13 +234,16 @@ def read_esim():
     if transport["backend"] == "at":
         ensure_esim_port_available(esim_port)
     info = capability.pop("probe_info", None) or LPAC.info(esim_port, **transport)
+    RUNTIME_LOG.write("esim", f"已读取 eUICC 基础信息，端口={esim_port}，后端={transport['backend']}")
     try:
         profile_timeout = 45 if transport["backend"] == "at" else 20
         profiles = LPAC.profiles(esim_port, timeout=profile_timeout, **transport)
         profiles_error = ""
+        RUNTIME_LOG.write("esim", "Profile 列表读取完成")
     except EC20Error as exc:
         profiles = []
         profiles_error = str(exc)
+        RUNTIME_LOG.write("esim", f"Profile 列表读取失败：{exc}", "ERROR")
     return {
         "info": info,
         "profiles": profiles,
@@ -248,7 +258,7 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
 
     def log_message(self, fmt, *args):
-        print(f"{self.address_string()} - {fmt % args}")
+        RUNTIME_LOG.write("http", f"{self.address_string()} - {fmt % args}")
 
     def end_headers(self):
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
@@ -277,6 +287,10 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             if path == "/api/health":
                 return self.send_json({"ok": True, "version": (APP_DIR / "VERSION").read_text().strip()})
+            if path == "/api/logs":
+                return self.send_json({"lines": RUNTIME_LOG.snapshot(), "sequence": RUNTIME_LOG.latest_sequence()})
+            if path == "/api/logs/stream":
+                return self.stream_logs()
             if path == "/api/ports":
                 return self.send_json({"ports": MODEM.ports(), "selected": selected_port()})
             if path == "/api/devices":
@@ -297,7 +311,32 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(result)
             return self.send_json({"error": "接口不存在"}, 404)
         except Exception as exc:
+            RUNTIME_LOG.write("http", f"GET {path} 失败：{exc}", "ERROR")
             self.send_json({"error": str(exc)}, 503)
+
+    def stream_logs(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "keep-alive")
+        self.end_headers()
+        query = parse_qs(urlparse(self.path).query)
+        try:
+            after = int(query.get("after", [RUNTIME_LOG.latest_sequence()])[0])
+        except ValueError:
+            after = RUNTIME_LOG.latest_sequence()
+        try:
+            while True:
+                entries = RUNTIME_LOG.wait(after, timeout=15)
+                if not entries:
+                    self.wfile.write(b": keepalive\n\n")
+                for sequence, line in entries:
+                    payload = json.dumps({"sequence": sequence, "line": line}, ensure_ascii=False)
+                    self.wfile.write(f"data: {payload}\n\n".encode("utf-8"))
+                    after = sequence
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return
 
     def do_POST(self):
         path = urlparse(self.path).path
@@ -402,9 +441,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"ok": True, "result": result})
             return self.send_json({"error": "接口不存在"}, 404)
         except (ValueError, TypeError, EC20Error) as exc:
+            RUNTIME_LOG.write("http", f"POST {path} 失败：{exc}", "WARN")
             self.send_json({"error": str(exc)}, 400)
         except Exception as exc:
             traceback.print_exc()
+            RUNTIME_LOG.write("http", f"POST {path} 异常：{exc}", "ERROR")
             self.send_json({"error": str(exc)}, 503)
 
 
@@ -412,7 +453,7 @@ def main():
     host = os.environ.get("EC20_WEB_HOST", "0.0.0.0")
     port = int(os.environ.get("EC20_WEB_PORT", "7571"))
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"EC20 Manager listening on http://{host}:{port}")
+    RUNTIME_LOG.write("server", f"EC20 Manager listening on http://{host}:{port}")
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 

@@ -15,7 +15,7 @@ const api = async (path, options={}) => {
 };
 const post = (path,data) => api(path,{method:"POST",body:JSON.stringify(data)});
 const toast = text => {$("#toast").textContent=text;$("#toast").classList.add("show");setTimeout(()=>$("#toast").classList.remove("show"),2400)};
-let devices=[], selected=null, scanned=[], esimLoading=false, esimDiagnostic=null;
+let devices=[], selected=null, scanned=[], esimLoading=false, esimDiagnostic=null, logSource=null;
 
 const displayNumber = status => status?.number_clean||"SIM 未存储号码";
 const signalText = status => status?.signal_dbm===null||status?.signal_dbm===undefined?"信号未知":`${status.signal_quality} · ${status.signal_dbm} dBm`;
@@ -76,7 +76,7 @@ function fillNamedForm(form,device){
 function formData(form=$("#configForm")){
   const f=form.elements;return {id:f.id.value,name:f.name.value,imei:f.imei.value,usb_path:f.usb_path.value,network_interface:f.network_interface.value,at_port:f.at_port.value,control_device:f.control_device.value,apn:f.apn.value,mode:f.mode.value,esim_backend:f.esim_backend.value,network_enabled:f.network_enabled.checked,vowifi:f.vowifi.checked};
 }
-function switchTab(id){document.querySelectorAll(".tabs button,.tab").forEach(x=>x.classList.remove("active"));document.querySelector(`[data-tab="${id}"]`).classList.add("active");$(`#${id}`).classList.add("active");if(id==="esim")loadEsim()}
+function switchTab(id){document.querySelectorAll(".tabs button,.tab").forEach(x=>x.classList.remove("active"));document.querySelector(`[data-tab="${id}"]`).classList.add("active");$(`#${id}`).classList.add("active");if(id==="esim")loadEsim();if(id==="logs")startLogs();else stopLogs()}
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
 $("#searchInput").oninput=renderDevices;
 $("#refreshButton").onclick=loadDevices;$("#scanButton").onclick=()=>scan(true);$("#addButton").onclick=()=>scan(true);$("#closeModal").onclick=()=>$("#modal").classList.remove("open");
@@ -88,6 +88,30 @@ function addSession(container,command,response){const empty=container.querySelec
 $("#atTemplate").onchange=e=>{$("#atInput").value=e.target.value};
 $("#clearAt").onclick=()=>$("#atHistory").innerHTML=`<div class="session-empty">暂无 AT 会话记录</div>`;
 $("#clearUssd").onclick=()=>$("#ussdHistory").innerHTML=`<div class="session-empty">暂无 USSD 会话记录</div>`;
+function appendLog(line){
+  const terminal=$("#logTerminal"),nearBottom=terminal.scrollHeight-terminal.scrollTop-terminal.clientHeight<80;
+  const lines=(terminal.textContent?terminal.textContent.split("\n"):[]).concat(line).slice(-1000);
+  terminal.textContent=lines.join("\n");
+  if(nearBottom)terminal.scrollTop=terminal.scrollHeight;
+}
+async function startLogs(){
+  if(logSource)return;
+  const terminal=$("#logTerminal"),status=$("#logStatus");
+  status.textContent="连接中";status.classList.remove("online");
+  let sequence=0;
+  try{
+    const snapshot=await api("/api/logs",{timeout:10000});
+    sequence=snapshot.sequence||0;
+    terminal.textContent=(snapshot.lines||[]).join("\n")||"暂无运行日志";
+    terminal.scrollTop=terminal.scrollHeight;
+  }catch(e){terminal.textContent=`日志快照读取失败：${e.message}`}
+  logSource=new EventSource(`/api/logs/stream?after=${sequence}`);
+  logSource.onopen=()=>{status.textContent="实时连接";status.classList.add("online")};
+  logSource.onmessage=e=>{try{appendLog(JSON.parse(e.data).line)}catch(error){appendLog(e.data)}};
+  logSource.onerror=()=>{status.textContent="正在重连";status.classList.remove("online")};
+}
+function stopLogs(){if(logSource){logSource.close();logSource=null}const status=$("#logStatus");if(status){status.textContent="未连接";status.classList.remove("online")}}
+$("#clearLogs").onclick=()=>{$("#logTerminal").textContent=""};
 $("#atForm").onsubmit=async e=>{e.preventDefault();const cmd=$("#atInput").value;try{const d=await post("/api/at",{command:cmd,timeout:Math.ceil(Number($("#atTimeout").value)/1000)});addSession($("#atHistory"),cmd,d.response)}catch(x){addSession($("#atHistory"),cmd,`ERROR: ${x.message}`)}};
 $("#ussdForm").onsubmit=async e=>{e.preventDefault();const code=$("#ussdInput").value;try{const d=await post("/api/ussd",{code,timeout:Math.ceil(Number($("#ussdTimeout").value)/1000)});addSession($("#ussdHistory"),code,d.response)}catch(x){addSession($("#ussdHistory"),code,`ERROR: ${x.message}`)}};
 function deepValue(value,keys){

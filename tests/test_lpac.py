@@ -1,9 +1,9 @@
+import io
 import json
 import subprocess
 import sys
 import unittest
 from pathlib import Path
-from subprocess import CompletedProcess
 from unittest.mock import patch
 
 
@@ -13,34 +13,49 @@ from ec20 import EC20Error  # noqa: E402
 from lpac import Lpac  # noqa: E402
 
 
+class FakePopen:
+    def __init__(self, command, stdout="", stderr="", returncode=0, timeout=False, **kwargs):
+        self.command = command
+        self.stdout = io.StringIO(stdout)
+        self.stderr = io.StringIO(stderr)
+        self.returncode = returncode
+        self.timeout = timeout
+
+    def wait(self, timeout=None):
+        if self.timeout:
+            self.timeout = False
+            raise subprocess.TimeoutExpired(self.command, timeout)
+        return self.returncode
+
+    def kill(self):
+        self.returncode = -9
+
+
 class LpacTest(unittest.TestCase):
-    @patch("lpac.subprocess.run")
-    def test_returns_payload_data(self, run):
-        run.return_value = CompletedProcess(
-            ["lpac"],
-            0,
-            stdout=json.dumps({"payload": {"code": 0, "data": {"eid": "123"}}}),
-            stderr="",
+    def setUp(self):
+        Lpac.logger = None
+
+    @patch("lpac.subprocess.Popen")
+    def test_returns_payload_data(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"], stdout=json.dumps({"payload": {"code": 0, "data": {"eid": "123"}}})
         )
 
         self.assertEqual(Lpac.run("/dev/ttyUSB2", "chip", "info"), {"eid": "123"})
-        env = run.call_args.kwargs["env"]
+        env = popen.call_args.kwargs["env"]
         self.assertEqual(env["LPAC_APDU"], "at")
         self.assertEqual(env["LPAC_APDU_AT_DEVICE"], "/dev/ttyUSB2")
 
-    @patch("lpac.subprocess.run")
-    def test_qmi_uses_separate_binary_and_transport(self, run):
-        run.return_value = CompletedProcess(
-            ["lpac-qmi"],
-            0,
-            stdout=json.dumps({"payload": {"code": 0, "data": []}}),
-            stderr="",
+    @patch("lpac.subprocess.Popen")
+    def test_qmi_uses_separate_binary_and_transport(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac-qmi"], stdout=json.dumps({"payload": {"code": 0, "data": []}})
         )
 
         Lpac.run("/dev/ttyUSB2", "profile", "list", backend="qmi", control_device="/dev/cdc-wdm0")
 
-        self.assertEqual(run.call_args.args[0][0], "lpac-qmi")
-        env = run.call_args.kwargs["env"]
+        self.assertEqual(popen.call_args.args[0][0], "lpac-qmi")
+        env = popen.call_args.kwargs["env"]
         self.assertEqual(env["LPAC_APDU"], "qmi")
         self.assertEqual(env["LPAC_APDU_QMI_DEVICE"], "/dev/cdc-wdm0")
         self.assertEqual(env["LPAC_APDU_QMI_UIM_SLOT"], "1")
@@ -54,39 +69,48 @@ class LpacTest(unittest.TestCase):
         Lpac().profiles("/dev/ttyUSB2")
         run.assert_called_once_with("/dev/ttyUSB2", "profile", "list", timeout=45)
 
-    @patch("lpac.subprocess.run")
-    def test_translates_qmi_symbol_lookup_error(self, run):
-        run.return_value = CompletedProcess(
-            ["lpac"],
-            127,
-            stdout="",
+    @patch("lpac.subprocess.Popen")
+    def test_translates_qmi_symbol_lookup_error(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"], returncode=127,
             stderr="lpac: symbol lookup error: undefined symbol: qmi_message_uim_logical_channel_output_get_result",
         )
 
         with self.assertRaisesRegex(EC20Error, "动态库不兼容"):
             Lpac.run("/dev/ttyUSB2", "chip", "info")
 
-    @patch("lpac.subprocess.run")
-    def test_timeout_reports_apdu_stage(self, run):
-        run.side_effect = subprocess.TimeoutExpired(
-            ["lpac"],
-            20,
-            output="AT_DEBUG: AT+CGLA=1,10,\"80E2910006\"\n",
+    @patch("lpac.subprocess.Popen")
+    def test_timeout_reports_apdu_stage(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"], stdout="AT_DEBUG: AT+CGLA=1,10,\"80E2910006\"\n", timeout=True
         )
 
         with self.assertRaisesRegex(EC20Error, "eUICC APDU 无响应"):
             Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
 
-    @patch("lpac.subprocess.run")
-    def test_timeout_reports_apdu_stage_from_stderr(self, run):
-        run.side_effect = subprocess.TimeoutExpired(
-            ["lpac"],
-            20,
-            stderr="AT_DEBUG: AT+CCHO=\"A0000005591010FFFFFFFF8900000100\"\n",
+    @patch("lpac.subprocess.Popen")
+    def test_timeout_reports_apdu_stage_from_stderr(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"], stderr="AT_DEBUG: AT+CCHO=\"A0000005591010FFFFFFFF8900000100\"\n", timeout=True
         )
 
         with self.assertRaisesRegex(EC20Error, "打开 eUICC ISD-R 逻辑通道时无响应"):
             Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
+
+    @patch("lpac.subprocess.Popen")
+    def test_streams_lpac_output_to_logger(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"],
+            stdout='AT_DEBUG: AT+CGLA=1,10,"80E2910006"\n'
+            + json.dumps({"payload": {"code": 0, "data": []}})
+            + "\n",
+        )
+        messages = []
+        Lpac.logger = lambda source, message, level: messages.append((source, message, level))
+
+        Lpac.run("/dev/ttyUSB2", "profile", "list")
+
+        self.assertIn(("lpac/stdout", 'AT_DEBUG: AT+CGLA=1,10,"80E2910006"', "DEBUG"), messages)
 
 
 if __name__ == "__main__":

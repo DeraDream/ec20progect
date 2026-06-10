@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/opt/ec20-manager/app/backend
 Environment=EC20_DATA_DIR=/opt/ec20-manager/data
+Environment=EC20_LOG_DIR=/opt/ec20-manager/logs
 Environment=EC20_WEB_HOST=0.0.0.0
 Environment=EC20_WEB_PORT=7571
 ExecStart=/usr/bin/python3 /opt/ec20-manager/app/backend/server.py

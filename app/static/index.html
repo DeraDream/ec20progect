@@ -44,6 +44,7 @@
             <button data-tab="esim">eSIM</button>
             <button data-tab="at">AT 终端</button>
             <button data-tab="ussd">USSD 终端</button>
+            <button data-tab="logs">实时日志</button>
             <button data-tab="config">配置</button>
           </div>
           <div id="overview" class="tab active">
@@ -75,6 +76,11 @@
             <div class="title-row"><div class="section-icon">▯</div><div><h3>USSD 交互终端</h3><p>发送 USSD 代码并等待网络菜单响应</p></div></div>
             <div id="ussdHistory" class="session-box"><div class="session-empty">暂无 USSD 会话记录</div></div>
             <form id="ussdForm" class="command-bar ussd-bar"><input id="ussdInput" required placeholder="例如 *100# 或菜单回复数字"><input id="ussdTimeout" type="number" value="45000"><button type="button" id="clearUssd" class="light">清空</button><button>发送</button></form>
+          </div>
+          <div id="logs" class="tab">
+            <div class="title-row"><div class="section-icon log-icon">LOG</div><div><h3>实时日志</h3><p>只读日志终端，实时显示服务、eSIM、lpac 和 HTTP 运行状态</p></div><span id="logStatus" class="log-status">未连接</span><button id="clearLogs" class="light">清空窗口</button></div>
+            <pre id="logTerminal" class="log-terminal" aria-live="polite">正在连接实时日志...</pre>
+            <p class="log-hint">SSH 终端也可执行：tail -f /opt/ec20-manager/logs/ec20-manager.log</p>
           </div>
           <div id="config" class="tab">
             <div class="config-head"><div class="title-row"><div class="section-icon">⌁</div><div><h3>设备配置</h3><p>配置保存在数据目录中</p></div></div><div><button id="deleteButton" class="danger">删除设备</button><button id="saveButton">保存配置</button></div></div>
