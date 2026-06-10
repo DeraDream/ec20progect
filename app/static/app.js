@@ -17,10 +17,13 @@ const post = (path,data) => api(path,{method:"POST",body:JSON.stringify(data)});
 const toast = text => {$("#toast").textContent=text;$("#toast").classList.add("show");setTimeout(()=>$("#toast").classList.remove("show"),2400)};
 let devices=[], selected=null, scanned=[], esimLoading=false;
 
+const displayNumber = status => status?.number_clean||"SIM 未存储号码";
+const signalText = status => status?.signal_dbm===null||status?.signal_dbm===undefined?"信号未知":`${status.signal_quality} · ${status.signal_dbm} dBm`;
+
 function renderDevices(){
   const keyword=$("#searchInput").value.toLowerCase();
   const shown=devices.filter(d=>JSON.stringify(d).toLowerCase().includes(keyword));
-  $("#deviceList").innerHTML=shown.length?shown.map(d=>`<article class="device-item ${selected?.id===d.id?"active":""}" data-id="${esc(d.id)}"><header><b>${esc(d.name||d.id)}</b><i class="dot ${d.online?"online":""}"></i><span class="badge">${d.online?"在线":"离线"}</span></header><p>${esc(d.id)} · ${esc(d.at_port||"未配置 AT 端口")}</p><p>${esc(d.status?.operator_clean||d.imei||"等待设备...")}</p></article>`).join(""):`<div class="empty-state">暂无设备<br>点击右上角“添加设备”开始接管</div>`;
+  $("#deviceList").innerHTML=shown.length?shown.map(d=>`<article class="device-item ${selected?.id===d.id?"active":""}" data-id="${esc(d.id)}"><header><b>${esc(d.name||"蜂窝设备")}</b><i class="dot ${d.online?"online":""}"></i><span class="badge">${d.online?"在线":"离线"}</span></header><p class="device-network">${esc(d.status?.operator_clean||"等待网络")} · ${esc(d.status?.network_mode_clean||"网络未知")}</p><p>${esc(signalText(d.status))}</p></article>`).join(""):`<div class="empty-state">暂无设备<br>点击右上角“添加设备”开始接管</div>`;
   document.querySelectorAll(".device-item").forEach(el=>el.onclick=()=>selectDevice(el.dataset.id));
 }
 function fillForm(device){
@@ -32,9 +35,10 @@ function fillForm(device){
 function showDevice(device){
   selected=device;renderDevices();fillForm(device);
   $("#emptyDevice").classList.add("hidden");$("#deviceContent").classList.remove("hidden");
-  $("#deviceBanner").innerHTML=`<span class="logo">V</span><div><h2>${esc(device.name||device.id)}</h2><p class="meta"><span>${esc(device.id)}</span><span>AT：${esc(device.at_port||"---")}</span><span>IMEI：${esc(device.status?.imei_clean||device.imei||"---")}</span></p></div>`;
   const s=device.status||{};
-  $("#overviewGrid").innerHTML=`<section class="overview-panel"><h4>运行状态</h4><div class="network-pill">● ${esc(s.operator_clean||"等待网络")}</div><div class="signal-big">${esc(s.signal_percent??0)}%</div><p>信号强度</p><dl><dt>网络模式</dt><dd>${esc(s.network_mode_clean||"---")}</dd><dt>注册状态</dt><dd>${esc(s.registration_clean||"---")}</dd><dt>SIM 状态</dt><dd>${esc(s.sim_clean||"---")}</dd></dl></section><section class="overview-panel"><h4>SIM / 设备</h4><dl><dt>IMEI</dt><dd>${esc(s.imei_clean||device.imei||"---")}</dd><dt>ICCID</dt><dd>${esc(s.iccid_clean||"---")}</dd><dt>IMSI</dt><dd>${esc(s.imsi_clean||"---")}</dd><dt>本机号码</dt><dd>${esc(s.number_clean||"---")}</dd><dt>固件版本</dt><dd>${esc(s.firmware_clean||"---")}</dd><dt>运行模式</dt><dd>${esc(device.mode||"AT")}</dd></dl></section><section class="overview-panel"><h4>网络</h4><div class="network-empty">${device.network_enabled?"网络已开启":"数据未开启"}</div></section><section class="traffic-panel"><h3>当前设备流量分析</h3><p>数据每分钟采样一次，按日/周/月聚合</p><div>${device.network_enabled?"等待流量采样数据":"网络已禁用，暂无流量分析"}</div></section>`;
+  $("#deviceBanner").innerHTML=`<span class="logo">V</span><div><h2>${esc(device.name||"蜂窝设备")}</h2><p class="meta"><span class="status-dot ${device.online?"online":""}">${device.online?"在线":"离线"}</span><span>${esc(s.operator_clean||"等待网络")}</span><span>${esc(s.network_mode_clean||"网络未知")}</span><span>${esc(displayNumber(s))}</span></p></div>`;
+  const signalValue=s.signal_percent===null||s.signal_percent===undefined?"--":`${s.signal_percent}%`;
+  $("#overviewGrid").innerHTML=`<section class="overview-panel"><h4>移动网络</h4><div class="network-pill">● ${esc(s.operator_clean||"等待网络")}</div><div class="signal-head"><div><div class="signal-big">${esc(signalValue)}</div><p>信号质量 · ${esc(s.signal_quality||"未知")}</p><small>百分比根据模组 CSQ 粗略估算</small></div><b>${esc(s.signal_dbm===null||s.signal_dbm===undefined?"-- dBm":`${s.signal_dbm} dBm`)}</b></div><div class="signal-meter"><i style="width:${esc(s.signal_percent??0)}%"></i></div><dl><dt>网络制式</dt><dd>${esc(s.network_mode_clean||"未知")}</dd><dt>注册状态</dt><dd>${esc(s.registration_clean||"未知")}</dd><dt>SIM 状态</dt><dd>${esc(s.sim_clean||"未知")}</dd></dl></section><section class="overview-panel"><h4>SIM 卡</h4><div class="phone-number"><span>本机号码</span><b>${esc(displayNumber(s))}</b>${s.number_clean?"":`<small>运营商未将号码写入 SIM，无法由设备自动读取</small>`}</div><dl><dt>ICCID</dt><dd>${esc(s.iccid_clean||"未知")}</dd><dt>IMSI</dt><dd>${esc(s.imsi_clean||"未知")}</dd></dl></section><section class="overview-panel"><h4>数据连接</h4><div class="network-empty">${device.network_enabled?"移动数据已开启":"移动数据未开启"}</div></section><section class="traffic-panel"><h3>当前设备流量分析</h3><p>数据每分钟采样一次，按日/周/月聚合</p><div>${device.network_enabled?"等待流量采样数据":"网络已禁用，暂无流量分析"}</div></section>`;
 }
 async function loadDevices(){
   try{
@@ -137,7 +141,7 @@ async function loadEsim(){
   }catch(e){
     $("#esimInfo").textContent="eSIM 读取失败";
     $("#esimSummary").innerHTML=`<article><span>EID</span><b>读取失败</b></article><article><span>Profile</span><b>--</b></article><article><span>已启用</span><b>--</b></article><article><span>eUICC 状态</span><b>异常</b></article>`;
-    $("#profileList").innerHTML=`<div class="esim-error"><b>无法读取 eSIM</b><span>${esc(e.message)}</span><small>lpac AT 模式需要当前端口支持 AT+CCHO、AT+CCHC 和 AT+CGLA。</small></div>`;
+    $("#profileList").innerHTML=`<div class="esim-error"><b>无法读取 eSIM</b><span>${esc(e.message)}</span><small>VoHive、ModemManager、串口终端和其他 lpac 实例均可能占用 eSIM AT 端口。</small></div>`;
   }finally{esimLoading=false;$("#reloadEsim").disabled=false;$("#reloadEsim").textContent="刷新"}
 }
 function profileCard(p){return `<article class="profile-card"><header><b>${esc(p.name)}</b><span>ICCID ${esc(p.iccid||"未知")}</span></header><div class="profile-row"><i class="dot ${p.enabled?"online":""}"></i><div class="profile-meta"><b>${esc(p.provider)}</b><small>${p.enabled?"已启用":"已禁用"}</small><span class="profile-type">${esc(p.type)}</span></div><div class="profile-actions">${p.enabled?`<button data-action="disable" data-iccid="${esc(p.iccid)}">禁用</button>`:`<button class="enable" data-action="enable" data-iccid="${esc(p.iccid)}">启用</button>`}<button data-action="nickname" data-name="${esc(p.name)}" data-iccid="${esc(p.iccid)}">改名</button><button class="delete" data-action="delete" data-iccid="${esc(p.iccid)}">删除</button></div></div></article>`}

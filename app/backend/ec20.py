@@ -5,6 +5,8 @@ import select
 import termios
 import threading
 import time
+from contextlib import contextmanager
+from pathlib import Path
 
 
 class EC20Error(RuntimeError):
@@ -14,6 +16,11 @@ class EC20Error(RuntimeError):
 class EC20Modem:
     def __init__(self):
         self._lock = threading.RLock()
+
+    @contextmanager
+    def serial_session(self):
+        with self._lock:
+            yield
 
     @staticmethod
     def ports():
@@ -141,14 +148,14 @@ class EC20Modem:
                 result[key] = self.command(port, command, timeout=2)
             except Exception as exc:
                 result[key] = f"ERROR: {exc}"
-        result["signal_percent"] = self._signal_percent(result["signal"])
+        result.update(self._signal(result["signal"]))
         result["model_clean"] = self._value(result["model"])
         result["firmware_clean"] = self._value(result["firmware"])
         result["imei_clean"] = self._value(result["imei"])
         result["iccid_clean"] = self._value(result["iccid"], "+QCCID:")
         result["operator_clean"] = self._operator(result["operator"])
         result["imsi_clean"] = self._value(result["imsi"])
-        result["number_clean"] = self._value(result["number"], "+CNUM:")
+        result["number_clean"] = self._number(result["number"])
         result["network_mode_clean"] = self._network_mode(result["network_mode"])
         result["registration_clean"] = self._registration(result["registration"])
         result["sim_clean"] = self._sim_state(result["sim"])
@@ -169,7 +176,34 @@ class EC20Modem:
     def _operator(cls, value):
         raw = cls._value(value, "+COPS:")
         match = re.match(r'\d+,\d+,"([^"]*)"(?:,\d+)?', raw)
-        return match.group(1) if match else raw
+        operator = match.group(1) if match else raw
+        operators = {
+            "46000": "中国移动",
+            "46002": "中国移动",
+            "46004": "中国移动",
+            "46007": "中国移动",
+            "46008": "中国移动",
+            "46001": "中国联通",
+            "46006": "中国联通",
+            "46009": "中国联通",
+            "46003": "中国电信",
+            "46005": "中国电信",
+            "46011": "中国电信",
+            "46015": "中国广电",
+            "CHINA MOBILE": "中国移动",
+            "CHN-CMCC": "中国移动",
+            "CHINA UNICOM": "中国联通",
+            "CHN-UNICOM": "中国联通",
+            "CHINA TELECOM": "中国电信",
+            "CHN-CT": "中国电信",
+        }
+        return operators.get(operator.upper(), operator)
+
+    @classmethod
+    def _number(cls, value):
+        raw = cls._value(value, "+CNUM:")
+        match = re.search(r'"(\+?[0-9]{5,20})"', raw)
+        return match.group(1) if match else ""
 
     @classmethod
     def _network_mode(cls, value):
@@ -237,17 +271,52 @@ class EC20Modem:
         return preferred_port, preferred_capability
 
     @staticmethod
+    def port_holders(port):
+        if not port or not os.path.isdir("/proc"):
+            return []
+        target = os.path.realpath(port)
+        holders = []
+        for process_dir in glob.glob("/proc/[0-9]*"):
+            try:
+                pid = int(os.path.basename(process_dir))
+                if pid == os.getpid():
+                    continue
+                if not any(os.path.realpath(fd) == target for fd in glob.glob(f"{process_dir}/fd/*")):
+                    continue
+                name = Path(f"{process_dir}/comm").read_text("utf-8").strip()
+                holders.append({"pid": pid, "name": name or "未知进程"})
+            except (FileNotFoundError, PermissionError, OSError, ValueError):
+                continue
+        return holders
+
+    @staticmethod
     def _command_ok(response):
         lines = [line.strip() for line in (response or "").splitlines() if line.strip()]
         return bool(lines and lines[-1] == "OK")
 
     @staticmethod
-    def _signal_percent(value):
+    def _signal(value):
         match = re.search(r"\+CSQ:\s*(\d+)", value or "")
         if not match:
-            return 0
+            return {"signal_percent": None, "signal_dbm": None, "signal_quality": "未知"}
         rssi = int(match.group(1))
-        return 0 if rssi == 99 else min(100, round(rssi / 31 * 100))
+        if rssi == 99:
+            return {"signal_percent": None, "signal_dbm": None, "signal_quality": "未知"}
+        percent = min(100, round(rssi / 31 * 100))
+        dbm = -113 + 2 * rssi
+        if dbm >= -75:
+            quality = "优秀"
+        elif dbm >= -85:
+            quality = "良好"
+        elif dbm >= -95:
+            quality = "一般"
+        else:
+            quality = "较弱"
+        return {"signal_percent": percent, "signal_dbm": dbm, "signal_quality": quality}
+
+    @staticmethod
+    def _signal_percent(value):
+        return EC20Modem._signal(value)["signal_percent"]
 
     def list_sms(self, port):
         self.command(port, "AT+CMGF=1", timeout=2)
