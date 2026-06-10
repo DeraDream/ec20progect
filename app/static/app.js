@@ -140,7 +140,7 @@ async function loadEsim(){
   try{
     esimDiagnostic=await api("/api/esim/diagnostics",{timeout:10000});
     $("#esimInfo").textContent=`${esimDiagnostic.configured} → ${esimDiagnostic.selected} · ${esimDiagnostic.reason}`;
-    const d=await api("/api/esim",{timeout:60000});
+    const d=await api("/api/esim",{timeout:90000});
     const profiles=profileItems(d.profiles).map(normalizedProfile);
     renderEsimSummary(d.info||{},profiles,d.capability||{},d.profiles_error||"");
     if(d.profiles_error){

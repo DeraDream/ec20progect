@@ -86,7 +86,28 @@ class ServerEsimTransportTest(unittest.TestCase):
         self.assertEqual(result["profiles"], [])
         self.assertEqual(result["profiles_error"], "Profile 超时")
         self.assertNotIn("probe_info", result["capability"])
-        profiles.assert_called_once_with("/dev/ttyUSB0", timeout=10, backend="at")
+        profiles.assert_called_once_with("/dev/ttyUSB0", timeout=45, backend="at")
+
+    @patch.object(server.LPAC, "profiles", return_value=[])
+    @patch.object(
+        server,
+        "selected_esim_transport",
+        return_value=(
+            "/dev/ttyUSB2",
+            {"supported": True, "backend": "qmi", "probe_info": {"eid": "123"}},
+            {"backend": "qmi", "control_device": "/dev/cdc-wdm0"},
+        ),
+    )
+    def test_read_esim_keeps_short_profile_timeout_for_qmi(self, selected_transport, profiles):
+        result = server.read_esim()
+
+        self.assertEqual(result["profiles"], [])
+        profiles.assert_called_once_with(
+            "/dev/ttyUSB2",
+            timeout=20,
+            backend="qmi",
+            control_device="/dev/cdc-wdm0",
+        )
 
 
 if __name__ == "__main__":

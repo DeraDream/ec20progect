@@ -78,9 +78,11 @@ class Lpac:
             name = "lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac"
             raise EC20Error(f"系统未安装 {name}，请执行 ec20 更新") from exc
         except subprocess.TimeoutExpired as exc:
-            partial = exc.stdout or ""
-            if isinstance(partial, bytes):
-                partial = partial.decode("utf-8", "replace")
+            partial = "\n".join(
+                value.decode("utf-8", "replace") if isinstance(value, bytes) else value
+                for value in (exc.stdout, exc.stderr)
+                if value
+            )
             raise EC20Error(
                 f"lpac 在 {timeout} 秒内超时：{Lpac._timeout_detail(partial)}"
             ) from exc
@@ -99,7 +101,7 @@ class Lpac:
     def info(self, port, timeout=20, **transport):
         return self.run(port, "chip", "info", timeout=timeout, **transport)
 
-    def profiles(self, port, timeout=20, **transport):
+    def profiles(self, port, timeout=45, **transport):
         return self.run(port, "profile", "list", timeout=timeout, **transport)
 
     def profile_action(self, port, action, iccid, value=None, **transport):

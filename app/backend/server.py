@@ -228,7 +228,8 @@ def read_esim():
         ensure_esim_port_available(esim_port)
     info = capability.pop("probe_info", None) or LPAC.info(esim_port, **transport)
     try:
-        profiles = LPAC.profiles(esim_port, timeout=10, **transport)
+        profile_timeout = 45 if transport["backend"] == "at" else 20
+        profiles = LPAC.profiles(esim_port, timeout=profile_timeout, **transport)
         profiles_error = ""
     except EC20Error as exc:
         profiles = []

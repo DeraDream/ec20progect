@@ -52,7 +52,7 @@ class LpacTest(unittest.TestCase):
 
         run.reset_mock()
         Lpac().profiles("/dev/ttyUSB2")
-        run.assert_called_once_with("/dev/ttyUSB2", "profile", "list", timeout=20)
+        run.assert_called_once_with("/dev/ttyUSB2", "profile", "list", timeout=45)
 
     @patch("lpac.subprocess.run")
     def test_translates_qmi_symbol_lookup_error(self, run):
@@ -75,6 +75,17 @@ class LpacTest(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(EC20Error, "eUICC APDU 无响应"):
+            Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
+
+    @patch("lpac.subprocess.run")
+    def test_timeout_reports_apdu_stage_from_stderr(self, run):
+        run.side_effect = subprocess.TimeoutExpired(
+            ["lpac"],
+            20,
+            stderr="AT_DEBUG: AT+CCHO=\"A0000005591010FFFFFFFF8900000100\"\n",
+        )
+
+        with self.assertRaisesRegex(EC20Error, "打开 eUICC ISD-R 逻辑通道时无响应"):
             Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
 
 
