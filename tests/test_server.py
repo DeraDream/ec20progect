@@ -16,13 +16,13 @@ class ServerEsimTransportTest(unittest.TestCase):
         server.RUNTIME_LOG.path = None
         server.ESIM_AT_BACKENDS.clear()
 
-    def test_ordered_esim_ports_prefers_ttyusb3_over_status_port(self):
+    def test_ordered_esim_ports_prefers_status_port_without_configuration(self):
         ports = server.ordered_esim_ports(
             ["/dev/ttyUSB2", "/dev/ttyUSB0", "/dev/ttyUSB3", "/dev/ttyUSB1"],
             status_port="/dev/ttyUSB2",
         )
 
-        self.assertEqual(ports, ["/dev/ttyUSB3", "/dev/ttyUSB2", "/dev/ttyUSB0", "/dev/ttyUSB1"])
+        self.assertEqual(ports, ["/dev/ttyUSB2", "/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB3"])
 
     def test_ordered_esim_ports_prefers_explicit_configuration(self):
         ports = server.ordered_esim_ports(
@@ -31,11 +31,11 @@ class ServerEsimTransportTest(unittest.TestCase):
             status_port="/dev/ttyUSB2",
         )
 
-        self.assertEqual(ports, ["/dev/ttyUSB1", "/dev/ttyUSB3", "/dev/ttyUSB2"])
+        self.assertEqual(ports, ["/dev/ttyUSB1", "/dev/ttyUSB2", "/dev/ttyUSB3"])
 
     @patch.object(server.MODEM, "sibling_at_ports", return_value=["/dev/ttyUSB2", "/dev/ttyUSB3"])
-    def test_default_esim_port_uses_ttyusb3(self, sibling_at_ports):
-        self.assertEqual(server.default_esim_port("/dev/ttyUSB2"), "/dev/ttyUSB3")
+    def test_default_esim_port_uses_responsive_status_port(self, sibling_at_ports):
+        self.assertEqual(server.default_esim_port("/dev/ttyUSB2"), "/dev/ttyUSB2")
 
     @patch.object(server.LPAC, "info")
     @patch.object(server, "ensure_esim_port_available")

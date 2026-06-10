@@ -52,24 +52,17 @@ def ordered_esim_ports(ports, configured_port="", status_port=""):
     def priority(port):
         if configured_port and MODEM.same_port(port, configured_port):
             return (0, 0, port)
-        real_name = Path(os.path.realpath(port)).name
-        if "if03-port0" in port or real_name == "ttyUSB3":
-            return (1, 0, port)
         if status_port and MODEM.same_port(port, status_port):
-            return (2, 0, port)
+            return (1, 0, port)
+        real_name = Path(os.path.realpath(port)).name
         match = re.search(r"(\d+)$", real_name)
-        return (3, int(match.group(1)) if match else 999, port)
+        return (2, int(match.group(1)) if match else 999, port)
 
     return sorted(dict.fromkeys(ports), key=priority)
 
 
 def default_esim_port(status_port):
-    candidates = ordered_esim_ports(MODEM.sibling_at_ports(status_port), status_port=status_port)
-    if candidates:
-        real_name = Path(os.path.realpath(candidates[0])).name
-        if "if03-port0" in candidates[0] or real_name == "ttyUSB3":
-            return candidates[0]
-    return ""
+    return status_port or ""
 
 
 def scan_devices():

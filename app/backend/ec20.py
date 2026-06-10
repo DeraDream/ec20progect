@@ -297,7 +297,7 @@ class EC20Modem:
         results = {}
         for command in required:
             try:
-                response = self.command(port, command, timeout=3)
+                response = self.command(port, command, timeout=1)
             except Exception as exc:
                 response = f"ERROR: {exc}"
             results[command] = response

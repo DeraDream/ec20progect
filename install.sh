@@ -101,10 +101,10 @@ ensure_lpac() {
   if command -v lpac >/dev/null 2>&1 && [[ -x "$(command -v lpac)" ]]; then
     check_output="$(lpac --help 2>&1 || true)"
     if lpac_output_is_healthy "${check_output}"; then
-      ok "lpac 环境检查通过"
-      return
+      log "现有 lpac 可运行，继续检查并安装最新版本..."
+    else
+      warn "现有 lpac 无法正常启动，将重新安装"
     fi
-    warn "现有 lpac 无法正常启动，将重新安装"
   fi
 
   machine="$(uname -m)"

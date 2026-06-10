@@ -17,6 +17,12 @@ const post = (path,data) => api(path,{method:"POST",body:JSON.stringify(data)});
 const toast = text => {$("#toast").textContent=text;$("#toast").classList.add("show");setTimeout(()=>$("#toast").classList.remove("show"),2400)};
 let devices=[], selected=null, scanned=[], esimLoading=false, esimDiagnostic=null, logSource=null;
 
+const memoryText = value => {
+  const bytes=Number(value);
+  if(!Number.isFinite(bytes))return "--";
+  return bytes>=1024?`${(bytes/1024).toFixed(1)} KiB`:`${bytes} B`;
+};
+
 const displayNumber = status => status?.number_clean||"SIM 未存储号码";
 const signalText = status => status?.signal_dbm===null||status?.signal_dbm===undefined?"信号未知":`${status.signal_quality} · ${status.signal_dbm} dBm`;
 
@@ -147,6 +153,7 @@ function normalizedProfile(profile){
 }
 function renderEsimSummary(info,profiles,capability={},profilesError=""){
   const eid=deepValue(info,["eid","eidvalue"])||"未提供";
+  const freeMemory=deepValue(info,["freenonvolatilememory"]);
   const name=deepValue(info,["applicationname","application_name"])||"eSTK / eSIM";
   const enabled=profiles.filter(p=>p.enabled).length;
   $("#esimName").textContent=name;
@@ -155,7 +162,7 @@ function renderEsimSummary(info,profiles,capability={},profilesError=""){
   const profileCount=profilesError?"读取失败":`${profiles.length} 个`;
   const enabledCount=profilesError?"--":`${enabled} 个`;
   const status=profilesError?"已连接":profiles.length?"可用":"未安装 Profile";
-  $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profileCount}</b></article><article><span>已启用</span><b>${enabledCount}</b></article><article><span>eUICC 状态</span><b>${status}</b></article>`;
+  $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profileCount}</b></article><article><span>已启用</span><b>${enabledCount}</b></article><article><span>当前分区可用空间</span><b>${esc(memoryText(freeMemory))}</b></article><article><span>eUICC 状态</span><b>${status}</b></article>`;
 }
 async function loadEsim(){
   if(!selected||esimLoading)return;
