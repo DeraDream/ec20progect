@@ -154,6 +154,56 @@ EOF
   ok "lpac 安装并检查通过"
 }
 
+ensure_lpac_qmi() {
+  local machine pattern metadata download_url archive target binary check_output
+  machine="$(uname -m)"
+  case "${machine}" in
+    x86_64|amd64) pattern="^lpac-linux-x86_64-with-qmi\\.zip$" ;;
+    aarch64|arm64) pattern="^lpac-linux-aarch64-with-qmi\\.zip$" ;;
+    *) return ;;
+  esac
+  target="${INSTALL_DIR}/tools/lpac-qmi"
+  archive="$(mktemp)"
+  metadata="$(mktemp)"
+  mkdir -p "${target}"
+  curl --fail --location --retry 3 --output "${metadata}" \
+    "https://api.github.com/repos/estkme-group/lpac/releases/latest" || {
+      rm -f "${metadata}" "${archive}"
+      warn "无法获取 lpac QMI 发布信息，跳过可选 QMI 后端"
+      return
+    }
+  download_url="$(python3 -c 'import json,re,sys; data=json.load(open(sys.argv[1])); pattern=re.compile(sys.argv[2],re.I); print(next((a["browser_download_url"] for a in data.get("assets",[]) if pattern.search(a["name"])),""))' "${metadata}" "${pattern}")"
+  rm -f "${metadata}"
+  [[ -n "${download_url}" ]] || { warn "未找到 lpac QMI 安装包"; return; }
+  log "正在安装可选的 lpac QMI 后端..."
+  curl --fail --location --retry 3 --output "${archive}" "${download_url}" || {
+    rm -f "${archive}"
+    warn "lpac QMI 下载失败，跳过可选 QMI 后端"
+    return
+  }
+  rm -rf "${target:?}/"*
+  unzip -q "${archive}" -d "${target}" || {
+    rm -f "${archive}"
+    warn "lpac QMI 安装包解压失败，跳过可选 QMI 后端"
+    return
+  }
+  rm -f "${archive}"
+  binary="$(find "${target}" -type f -name lpac -print -quit)"
+  [[ -n "${binary}" ]] || { warn "lpac QMI 安装包无可执行文件"; return; }
+  chmod 755 "${binary}"
+  cat >"/usr/local/bin/lpac-qmi" <<EOF
+#!/usr/bin/env bash
+exec "${binary}" "\$@"
+EOF
+  chmod 755 /usr/local/bin/lpac-qmi
+  check_output="$(lpac-qmi --help 2>&1 || true)"
+  if ! lpac_output_is_healthy "${check_output}"; then
+    warn "lpac QMI 后端与系统 libqmi 不兼容；AT 后端仍可正常使用"
+  else
+    ok "lpac QMI 后端安装完成"
+  fi
+}
+
 lpac_output_is_healthy() {
   local output="${1,,}"
   [[ -n "${output}" &&
@@ -251,6 +301,7 @@ deploy_from_source() {
 
   mkdir -p "${INSTALL_DIR}/data" "${INSTALL_DIR}/logs" "${INSTALL_DIR}/backups"
   ensure_lpac
+  ensure_lpac_qmi
   rm -rf "${new_app}"
   mkdir -p "${new_app}"
   cp -a "${source_root}/app/." "${new_app}/"

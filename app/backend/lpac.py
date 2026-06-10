@@ -24,17 +24,49 @@ class Lpac:
         return output or f"lpac 执行失败：{returncode}"
 
     @staticmethod
-    def run(port, *args, timeout=120):
+    def _json_result(output):
+        for line in reversed((output or "").splitlines()):
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict) and "payload" in value:
+                return value
+        raise json.JSONDecodeError("lpac 未返回 JSON", output or "", 0)
+
+    @staticmethod
+    def _timeout_detail(output):
+        debug_lines = [
+            line.split("AT_DEBUG:", 1)[1].strip()
+            for line in (output or "").splitlines()
+            if "AT_DEBUG:" in line
+        ]
+        last_command = next((line for line in reversed(debug_lines) if line.startswith("AT+")), "")
+        if last_command.startswith("AT+CCHO"):
+            return "打开 eUICC ISD-R 逻辑通道时无响应"
+        if last_command.startswith("AT+CGLA"):
+            return "逻辑通道已打开，但 eUICC APDU 无响应"
+        if last_command.startswith("AT+CCHC"):
+            return "关闭旧逻辑通道时无响应"
+        return "未收到 eUICC 响应"
+
+    @staticmethod
+    def run(port, *args, timeout=120, backend="at", control_device="", slot=1):
         env = os.environ.copy()
         env.update({
-            "LPAC_APDU": "at",
+            "LPAC_APDU": backend,
             "LPAC_APDU_AT_DEVICE": port,
             "AT_DEVICE": port,
             "LPAC_HTTP": "curl",
         })
+        if backend == "at":
+            env["LPAC_APDU_AT_DEBUG"] = "true"
+        if backend == "qmi":
+            env["LPAC_APDU_QMI_DEVICE"] = control_device
+            env["LPAC_APDU_QMI_UIM_SLOT"] = str(slot)
         try:
             process = subprocess.run(
-                ["lpac", *args],
+                ["lpac-qmi" if backend == "qmi" else "lpac", *args],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -42,16 +74,20 @@ class Lpac:
                 check=False,
             )
         except FileNotFoundError as exc:
-            raise EC20Error("系统未安装 lpac，请执行更新脚本") from exc
+            name = "lpac-qmi" if backend == "qmi" else "lpac"
+            raise EC20Error(f"系统未安装 {name}，请执行 ec20 更新") from exc
         except subprocess.TimeoutExpired as exc:
+            partial = exc.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", "replace")
             raise EC20Error(
-                f"lpac 在 {timeout} 秒内未收到 eUICC 响应；逻辑通道可用，但 eSTK/eSIM 未响应"
+                f"lpac 在 {timeout} 秒内超时：{Lpac._timeout_detail(partial)}"
             ) from exc
         stdout = process.stdout.strip()
         stderr = process.stderr.strip()
         output = stdout or stderr
         try:
-            result = json.loads(stdout)
+            result = Lpac._json_result(stdout)
         except json.JSONDecodeError as exc:
             raise EC20Error(Lpac._friendly_error(output, process.returncode)) from exc
         payload = result.get("payload", {})
@@ -59,19 +95,19 @@ class Lpac:
             raise EC20Error(payload.get("message") or Lpac._friendly_error(stderr or output, process.returncode))
         return payload.get("data", {})
 
-    def info(self, port, timeout=20):
-        return self.run(port, "chip", "info", timeout=timeout)
+    def info(self, port, timeout=20, **transport):
+        return self.run(port, "chip", "info", timeout=timeout, **transport)
 
-    def profiles(self, port, timeout=20):
-        return self.run(port, "profile", "list", timeout=timeout)
+    def profiles(self, port, timeout=20, **transport):
+        return self.run(port, "profile", "list", timeout=timeout, **transport)
 
-    def profile_action(self, port, action, iccid, value=None):
+    def profile_action(self, port, action, iccid, value=None, **transport):
         args = ["profile", action, iccid]
         if value is not None:
             args.append(value)
-        return self.run(port, *args)
+        return self.run(port, *args, **transport)
 
-    def download(self, port, data):
+    def download(self, port, data, **transport):
         args = ["profile", "download"]
         activation = str(data.get("activation_code", "")).strip()
         if activation:
@@ -85,4 +121,4 @@ class Lpac:
                 value = str(data.get(key, "")).strip()
                 if value:
                     args.extend([flag, value])
-        return self.run(port, *args, timeout=300)
+        return self.run(port, *args, timeout=300, **transport)

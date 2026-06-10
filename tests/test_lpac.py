@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -27,6 +28,23 @@ class LpacTest(unittest.TestCase):
         self.assertEqual(env["LPAC_APDU"], "at")
         self.assertEqual(env["LPAC_APDU_AT_DEVICE"], "/dev/ttyUSB2")
 
+    @patch("lpac.subprocess.run")
+    def test_qmi_uses_separate_binary_and_transport(self, run):
+        run.return_value = CompletedProcess(
+            ["lpac-qmi"],
+            0,
+            stdout=json.dumps({"payload": {"code": 0, "data": []}}),
+            stderr="",
+        )
+
+        Lpac.run("/dev/ttyUSB2", "profile", "list", backend="qmi", control_device="/dev/cdc-wdm0", slot=2)
+
+        self.assertEqual(run.call_args.args[0][0], "lpac-qmi")
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["LPAC_APDU"], "qmi")
+        self.assertEqual(env["LPAC_APDU_QMI_DEVICE"], "/dev/cdc-wdm0")
+        self.assertEqual(env["LPAC_APDU_QMI_UIM_SLOT"], "2")
+
     @patch("lpac.Lpac.run")
     def test_read_operations_use_short_timeout(self, run):
         Lpac().info("/dev/ttyUSB2")
@@ -47,6 +65,17 @@ class LpacTest(unittest.TestCase):
 
         with self.assertRaisesRegex(EC20Error, "动态库不兼容"):
             Lpac.run("/dev/ttyUSB2", "chip", "info")
+
+    @patch("lpac.subprocess.run")
+    def test_timeout_reports_apdu_stage(self, run):
+        run.side_effect = subprocess.TimeoutExpired(
+            ["lpac"],
+            20,
+            output="AT_DEBUG: AT+CGLA=1,10,\"80E2910006\"\n",
+        )
+
+        with self.assertRaisesRegex(EC20Error, "eUICC APDU 无响应"):
+            Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
 
 
 if __name__ == "__main__":

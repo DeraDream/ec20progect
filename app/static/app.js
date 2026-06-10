@@ -28,7 +28,7 @@ function renderDevices(){
 }
 function fillForm(device){
   const form=$("#configForm");
-  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode"].forEach(k=>form.elements[k].value=device[k]|| (k==="mode"?"AT":""));
+  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode","esim_backend","esim_slot"].forEach(k=>form.elements[k].value=device[k]|| (k==="mode"?"AT":k==="esim_backend"?"AUTO":k==="esim_slot"?1:""));
   form.elements.network_enabled.checked=Boolean(device.network_enabled);
   form.elements.vowifi.checked=Boolean(device.vowifi);
 }
@@ -70,11 +70,11 @@ function chooseScanned(element,device){
   fillNamedForm($("#addForm"),device);$("#addConfig").classList.remove("hidden");
 }
 function fillNamedForm(form,device){
-  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode"].forEach(k=>form.elements[k].value=device[k]||(k==="mode"?"AT":""));
+  ["id","name","imei","usb_path","network_interface","at_port","control_device","apn","mode","esim_backend","esim_slot"].forEach(k=>form.elements[k].value=device[k]||(k==="mode"?"AT":k==="esim_backend"?"AUTO":k==="esim_slot"?1:""));
   form.elements.network_enabled.checked=Boolean(device.network_enabled);form.elements.vowifi.checked=Boolean(device.vowifi);
 }
 function formData(form=$("#configForm")){
-  const f=form.elements;return {id:f.id.value,name:f.name.value,imei:f.imei.value,usb_path:f.usb_path.value,network_interface:f.network_interface.value,at_port:f.at_port.value,control_device:f.control_device.value,apn:f.apn.value,mode:f.mode.value,network_enabled:f.network_enabled.checked,vowifi:f.vowifi.checked};
+  const f=form.elements;return {id:f.id.value,name:f.name.value,imei:f.imei.value,usb_path:f.usb_path.value,network_interface:f.network_interface.value,at_port:f.at_port.value,control_device:f.control_device.value,apn:f.apn.value,mode:f.mode.value,esim_backend:f.esim_backend.value,esim_slot:Number(f.esim_slot.value)||1,network_enabled:f.network_enabled.checked,vowifi:f.vowifi.checked};
 }
 function switchTab(id){document.querySelectorAll(".tabs button,.tab").forEach(x=>x.classList.remove("active"));document.querySelector(`[data-tab="${id}"]`).classList.add("active");$(`#${id}`).classList.add("active");if(id==="esim")loadEsim()}
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
@@ -120,12 +120,13 @@ function normalizedProfile(profile){
     enabled,
   };
 }
-function renderEsimSummary(info,profiles){
+function renderEsimSummary(info,profiles,capability={}){
   const eid=deepValue(info,["eid"])||"未提供";
   const name=deepValue(info,["applicationname","application_name"])||"eSTK / eSIM";
   const enabled=profiles.filter(p=>p.enabled).length;
   $("#esimName").textContent=name;
-  $("#esimInfo").textContent=eid==="未提供"?"通过 lpac 管理 eSTK Profile":`EID ${eid}`;
+  const backend=String(capability.backend||"").toUpperCase();
+  $("#esimInfo").textContent=eid==="未提供"?`通过 ${backend||"自动"} 后端管理 eSIM`:`EID ${eid} · ${backend||"AUTO"}`;
   $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profiles.length} 个</b></article><article><span>已启用</span><b>${enabled} 个</b></article><article><span>eUICC 状态</span><b>${profiles.length?"可用":"未安装 Profile"}</b></article>`;
 }
 async function loadEsim(){
@@ -136,12 +137,12 @@ async function loadEsim(){
   try{
     const d=await api("/api/esim",{timeout:60000});
     const profiles=profileItems(d.profiles).map(normalizedProfile);
-    renderEsimSummary(d.info||{},profiles);
+    renderEsimSummary(d.info||{},profiles,d.capability||{});
     $("#profileList").innerHTML=profiles.length?profiles.map(profileCard).join(""):`<div class="empty-state">eUICC 已连接，但未发现 Profile<br>可在下方输入激活码下载</div>`;
   }catch(e){
     $("#esimInfo").textContent="eSIM 读取失败";
     $("#esimSummary").innerHTML=`<article><span>EID</span><b>读取失败</b></article><article><span>Profile</span><b>--</b></article><article><span>已启用</span><b>--</b></article><article><span>eUICC 状态</span><b>异常</b></article>`;
-    $("#profileList").innerHTML=`<div class="esim-error"><b>无法读取 eSIM</b><span>${esc(e.message)}</span><small>VoHive、ModemManager、串口终端和其他 lpac 实例均可能占用 eSIM AT 端口。</small></div>`;
+    $("#profileList").innerHTML=`<div class="esim-error"><b>无法读取 eSIM</b><span>${esc(e.message)}</span><small>可在“配置”中将 eSIM 后端设为 AUTO/QMI，并检查 QMI 控制设备与 SIM 槽位。</small></div>`;
   }finally{esimLoading=false;$("#reloadEsim").disabled=false;$("#reloadEsim").textContent="刷新"}
 }
 function profileCard(p){return `<article class="profile-card"><header><b>${esc(p.name)}</b><span>ICCID ${esc(p.iccid||"未知")}</span></header><div class="profile-row"><i class="dot ${p.enabled?"online":""}"></i><div class="profile-meta"><b>${esc(p.provider)}</b><small>${p.enabled?"已启用":"已禁用"}</small><span class="profile-type">${esc(p.type)}</span></div><div class="profile-actions">${p.enabled?`<button data-action="disable" data-iccid="${esc(p.iccid)}">禁用</button>`:`<button class="enable" data-action="enable" data-iccid="${esc(p.iccid)}">启用</button>`}<button data-action="nickname" data-name="${esc(p.name)}" data-iccid="${esc(p.iccid)}">改名</button><button class="delete" data-action="delete" data-iccid="${esc(p.iccid)}">删除</button></div></div></article>`}

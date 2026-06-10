@@ -38,6 +38,13 @@ class EC20Modem:
                 unique[real_port] = port
         return sorted(unique.values())
 
+    @staticmethod
+    def control_devices():
+        devices = []
+        for pattern in ("/dev/cdc-wdm*", "/dev/wwan*", "/dev/mhi_*"):
+            devices.extend(glob.glob(pattern))
+        return sorted(set(devices))
+
     @classmethod
     def same_port(cls, first, second):
         return bool(first and second and os.path.realpath(first) == os.path.realpath(second))

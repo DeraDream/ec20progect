@@ -64,6 +64,8 @@ def scan_devices():
             "usb_path": MODEM.usb_path(port),
             "network_interface": (existing or {}).get("network_interface", ""),
             "control_device": (existing or {}).get("control_device", ""),
+            "esim_backend": (existing or {}).get("esim_backend", "AUTO"),
+            "esim_slot": (existing or {}).get("esim_slot", 1),
             "apn": (existing or {}).get("apn", ""),
             "mode": (existing or {}).get("mode", "AT"),
             "network_enabled": bool((existing or {}).get("network_enabled", False)),
@@ -105,10 +107,30 @@ def selected_port():
     return port
 
 
-def selected_esim_port():
+def selected_device():
+    config = read_config()
+    return config.get("devices", {}).get(config.get("selected_device"), {})
+
+
+def selected_esim_transport():
     port = selected_port()
     if not port:
         raise EC20Error("没有检测到可响应 AT 指令的 EC20 串口")
+    device = selected_device()
+    backend = str(device.get("esim_backend", "AUTO")).upper()
+    control_device = str(device.get("control_device", "")).strip()
+    control_devices = MODEM.control_devices()
+    if not control_device and len(control_devices) == 1:
+        control_device = control_devices[0]
+    if backend == "QMI" or (backend == "AUTO" and control_device):
+        if not control_device or not os.path.exists(control_device):
+            raise EC20Error("eSIM 已选择 QMI 后端，但未配置可用的 QMI 控制设备（例如 /dev/cdc-wdm0）")
+        slot = max(1, min(5, int(device.get("esim_slot", 1))))
+        return port, {"supported": True, "backend": "qmi"}, {
+            "backend": "qmi",
+            "control_device": control_device,
+            "slot": slot,
+        }
     esim_port, capability = MODEM.find_esim_port(port)
     if not capability["supported"]:
         missing = "、".join(capability["unsupported"])
@@ -116,7 +138,8 @@ def selected_esim_port():
             f"同一设备的 AT 端口均不支持 eSIM 逻辑通道命令：{missing}。"
             "请确认模组固件支持 AT+CCHO、AT+CCHC 和 AT+CGLA"
         )
-    return esim_port, capability
+    capability["backend"] = "at"
+    return esim_port, capability, {"backend": "at"}
 
 
 @contextmanager
@@ -185,10 +208,11 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"messages": MODEM.list_sms(port)})
             if path == "/api/esim":
                 with esim_operation():
-                    esim_port, capability = selected_esim_port()
-                    ensure_esim_port_available(esim_port)
-                    info = LPAC.info(esim_port)
-                    profiles = LPAC.profiles(esim_port)
+                    esim_port, capability, transport = selected_esim_transport()
+                    if transport["backend"] == "at":
+                        ensure_esim_port_available(esim_port)
+                    info = LPAC.info(esim_port, **transport)
+                    profiles = LPAC.profiles(esim_port, **transport)
                 return self.send_json({"info": info, "profiles": profiles, "capability": capability, "port": esim_port})
             return self.send_json({"error": "接口不存在"}, 404)
         except Exception as exc:
@@ -218,6 +242,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "network_interface": str(data.get("network_interface", "")).strip(),
                     "at_port": port,
                     "control_device": str(data.get("control_device", "")).strip(),
+                    "esim_backend": str(data.get("esim_backend", "AUTO")).upper(),
+                    "esim_slot": max(1, min(5, int(data.get("esim_slot", 1)))),
                     "apn": str(data.get("apn", "")).strip(),
                     "mode": str(data.get("mode", "AT")),
                     "network_enabled": bool(data.get("network_enabled")),
@@ -276,21 +302,23 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({"response": MODEM.apdu(port, str(data.get("apdu", "")))})
             if path == "/api/esim/profile":
                 with esim_operation():
-                    esim_port, _ = selected_esim_port()
-                    ensure_esim_port_available(esim_port)
+                    esim_port, _, transport = selected_esim_transport()
+                    if transport["backend"] == "at":
+                        ensure_esim_port_available(esim_port)
                     action = str(data.get("action", ""))
                     if action not in ("enable", "disable", "delete", "nickname"):
                         raise EC20Error("不支持的 Profile 操作")
                     value = str(data.get("nickname", "")) if action == "nickname" else None
-                    result = LPAC.profile_action(esim_port, action, str(data.get("iccid", "")), value)
+                    result = LPAC.profile_action(esim_port, action, str(data.get("iccid", "")), value, **transport)
                 return self.send_json({"ok": True, "result": result})
             if path == "/api/esim/download":
                 with esim_operation():
-                    esim_port, _ = selected_esim_port()
-                    ensure_esim_port_available(esim_port)
+                    esim_port, _, transport = selected_esim_transport()
+                    if transport["backend"] == "at":
+                        ensure_esim_port_available(esim_port)
                     if not str(data.get("imei", "")).strip():
                         data["imei"] = MODEM.status(port).get("imei_clean", "")
-                    result = LPAC.download(esim_port, data)
+                    result = LPAC.download(esim_port, data, **transport)
                 return self.send_json({"ok": True, "result": result})
             return self.send_json({"error": "接口不存在"}, 404)
         except (ValueError, TypeError, EC20Error) as exc:

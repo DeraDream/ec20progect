@@ -26,6 +26,11 @@ class EC20ModemTest(unittest.TestCase):
         )
         self.assertEqual(modem._value("EC20CEFHLGR06A03M1G\nOK"), "EC20CEFHLGR06A03M1G")
 
+    @patch("ec20.glob.glob")
+    def test_control_devices(self, glob):
+        glob.side_effect = [["/dev/cdc-wdm0"], [], []]
+        self.assertEqual(EC20Modem.control_devices(), ["/dev/cdc-wdm0"])
+
     @patch.object(EC20Modem, "esim_capability")
     @patch.object(EC20Modem, "command")
     @patch.object(EC20Modem, "at_ports")
