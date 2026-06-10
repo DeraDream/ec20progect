@@ -149,7 +149,9 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/sms":
                 return self.send_json({"messages": MODEM.list_sms(port)})
             if path == "/api/esim":
-                return self.send_json({"info": LPAC.info(port), "profiles": LPAC.profiles(port)})
+                info = LPAC.info(port)
+                profiles = LPAC.profiles(port)
+                return self.send_json({"info": info, "profiles": profiles})
             return self.send_json({"error": "接口不存在"}, 404)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 503)
@@ -241,6 +243,8 @@ class Handler(SimpleHTTPRequestHandler):
                 value = str(data.get("nickname", "")) if action == "nickname" else None
                 return self.send_json({"ok": True, "result": LPAC.profile_action(port, action, str(data.get("iccid", "")), value)})
             if path == "/api/esim/download":
+                if not str(data.get("imei", "")).strip():
+                    data["imei"] = MODEM.status(port).get("imei_clean", "")
                 return self.send_json({"ok": True, "result": LPAC.download(port, data)})
             return self.send_json({"error": "接口不存在"}, 404)
         except (ValueError, TypeError, EC20Error) as exc:

@@ -79,10 +79,62 @@ $("#clearAt").onclick=()=>$("#atHistory").innerHTML=`<div class="session-empty">
 $("#clearUssd").onclick=()=>$("#ussdHistory").innerHTML=`<div class="session-empty">暂无 USSD 会话记录</div>`;
 $("#atForm").onsubmit=async e=>{e.preventDefault();const cmd=$("#atInput").value;try{const d=await post("/api/at",{command:cmd,timeout:Math.ceil(Number($("#atTimeout").value)/1000)});addSession($("#atHistory"),cmd,d.response)}catch(x){addSession($("#atHistory"),cmd,`ERROR: ${x.message}`)}};
 $("#ussdForm").onsubmit=async e=>{e.preventDefault();const code=$("#ussdInput").value;try{const d=await post("/api/ussd",{code,timeout:Math.ceil(Number($("#ussdTimeout").value)/1000)});addSession($("#ussdHistory"),code,d.response)}catch(x){addSession($("#ussdHistory"),code,`ERROR: ${x.message}`)}};
-async function loadEsim(){if(!selected)return;$("#profileList").innerHTML=`<div class="empty-state">正在读取 eSIM...</div>`;try{const d=await api("/api/esim");$("#esimName").textContent=d.info?.euiccInfo2?.extCardResource?.installedApplication?.[0]?.applicationName||"eSTK / eSIM";const profiles=Array.isArray(d.profiles)?d.profiles:(d.profiles?.profiles||[]);$("#profileList").innerHTML=profiles.length?profiles.map(profileCard).join(""):`<div class="empty-state">未发现 Profile</div>`}catch(e){$("#profileList").innerHTML=`<div class="empty-state">${esc(e.message)}</div>`}}
-function profileCard(p){const iccid=p.iccid||p.profile?.iccid||"";const name=p.nickname||p.profileName||p.serviceProviderName||iccid;const enabled=String(p.state||p.profileState||"").toLowerCase().includes("enable");return `<article class="profile-card"><header><b>${esc(name)}</b><span>ICCID ${esc(iccid)}</span></header><div class="profile-row"><i class="dot ${enabled?"online":""}"></i><div class="profile-meta"><b>${esc(name)}</b><small>${esc(p.serviceProviderName||p.service_provider_name||"eSIM Profile")} · ${enabled?"已启用":"已禁用"}</small></div><div class="profile-actions">${enabled?`<button data-action="disable" data-iccid="${esc(iccid)}">禁用</button>`:`<button class="enable" data-action="enable" data-iccid="${esc(iccid)}">切换</button>`}<button data-action="nickname" data-iccid="${esc(iccid)}">改名</button><button class="delete" data-action="delete" data-iccid="${esc(iccid)}">删除</button></div></div></article>`}
-$("#profileList").onclick=async e=>{const b=e.target.closest("button[data-action]");if(!b)return;let nickname;if(b.dataset.action==="nickname"){nickname=prompt("输入新的 Profile 名称");if(nickname===null)return}if(b.dataset.action==="delete"&&!confirm("确定删除该 Profile？"))return;try{await post("/api/esim/profile",{action:b.dataset.action,iccid:b.dataset.iccid,nickname});toast("操作完成");loadEsim()}catch(x){toast(x.message)}};
+function deepValue(value,keys){
+  if(!value||typeof value!=="object")return "";
+  for(const [key,item] of Object.entries(value)){
+    if(keys.includes(key.toLowerCase())&&item!==null&&typeof item!=="object")return String(item);
+  }
+  for(const item of Object.values(value)){const found=deepValue(item,keys);if(found)return found}
+  return "";
+}
+function profileItems(value){
+  if(Array.isArray(value))return value;
+  if(!value||typeof value!=="object")return [];
+  for(const key of ["profiles","profileList","profileInfoList","profile_info_list"]){
+    if(Array.isArray(value[key]))return value[key];
+  }
+  for(const item of Object.values(value)){const found=profileItems(item);if(found.length)return found}
+  return [];
+}
+function normalizedProfile(profile){
+  const p=profile.profile||profile.profileInfo||profile;
+  const state=deepValue(p,["state","profilestate","profile_state"])||"disabled";
+  const enabled=/enable|active/i.test(state)&&!/disable|inactive/i.test(state);
+  const iccid=deepValue(p,["iccid"]);
+  return {
+    iccid,
+    name:deepValue(p,["nickname","profilename","profile_name"])||deepValue(p,["serviceprovidername","service_provider_name"])||iccid||"未命名 Profile",
+    provider:deepValue(p,["serviceprovidername","service_provider_name","operatorname"])||"eSIM Profile",
+    type:deepValue(p,["profileclass","profile_class","profiletype","profile_type"])||"Operational",
+    enabled,
+  };
+}
+function renderEsimSummary(info,profiles){
+  const eid=deepValue(info,["eid"])||"未提供";
+  const name=deepValue(info,["applicationname","application_name"])||"eSTK / eSIM";
+  const enabled=profiles.filter(p=>p.enabled).length;
+  $("#esimName").textContent=name;
+  $("#esimInfo").textContent=eid==="未提供"?"通过 lpac 管理 eSTK Profile":`EID ${eid}`;
+  $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profiles.length} 个</b></article><article><span>已启用</span><b>${enabled} 个</b></article><article><span>eUICC 状态</span><b>${profiles.length?"可用":"未安装 Profile"}</b></article>`;
+}
+async function loadEsim(){
+  if(!selected)return;
+  $("#reloadEsim").disabled=true;$("#reloadEsim").textContent="读取中...";
+  $("#profileList").innerHTML=`<div class="empty-state">正在读取 eSIM...</div>`;
+  try{
+    const d=await api("/api/esim");
+    const profiles=profileItems(d.profiles).map(normalizedProfile);
+    renderEsimSummary(d.info||{},profiles);
+    $("#profileList").innerHTML=profiles.length?profiles.map(profileCard).join(""):`<div class="empty-state">eUICC 已连接，但未发现 Profile<br>可在下方输入激活码下载</div>`;
+  }catch(e){
+    $("#esimInfo").textContent="eSIM 读取失败";
+    $("#esimSummary").innerHTML=`<article><span>EID</span><b>读取失败</b></article><article><span>Profile</span><b>--</b></article><article><span>已启用</span><b>--</b></article><article><span>eUICC 状态</span><b>异常</b></article>`;
+    $("#profileList").innerHTML=`<div class="esim-error"><b>无法读取 eSIM</b><span>${esc(e.message)}</span><small>请先确认 eSTK 已插入、AT 端口可用，并执行 ec20 更新检查 lpac。</small></div>`;
+  }finally{$("#reloadEsim").disabled=false;$("#reloadEsim").textContent="刷新"}
+}
+function profileCard(p){return `<article class="profile-card"><header><b>${esc(p.name)}</b><span>ICCID ${esc(p.iccid||"未知")}</span></header><div class="profile-row"><i class="dot ${p.enabled?"online":""}"></i><div class="profile-meta"><b>${esc(p.provider)}</b><small>${p.enabled?"已启用":"已禁用"}</small><span class="profile-type">${esc(p.type)}</span></div><div class="profile-actions">${p.enabled?`<button data-action="disable" data-iccid="${esc(p.iccid)}">禁用</button>`:`<button class="enable" data-action="enable" data-iccid="${esc(p.iccid)}">启用</button>`}<button data-action="nickname" data-name="${esc(p.name)}" data-iccid="${esc(p.iccid)}">改名</button><button class="delete" data-action="delete" data-iccid="${esc(p.iccid)}">删除</button></div></div></article>`}
+$("#profileList").onclick=async e=>{const b=e.target.closest("button[data-action]");if(!b||b.disabled)return;let nickname;if(!b.dataset.iccid){toast("该 Profile 没有可用 ICCID");return}if(b.dataset.action==="nickname"){nickname=prompt("输入新的 Profile 名称",b.dataset.name||"");if(nickname===null)return;if(!nickname.trim()){toast("名称不能为空");return}}if(b.dataset.action==="delete"&&!confirm("确定删除该 Profile？此操作不可恢复。"))return;try{b.disabled=true;await post("/api/esim/profile",{action:b.dataset.action,iccid:b.dataset.iccid,nickname});toast("eSIM 操作完成");await loadEsim()}catch(x){toast(x.message);b.disabled=false}};
 $("#reloadEsim").onclick=loadEsim;
-$("#downloadForm").onsubmit=async e=>{e.preventDefault();const f=e.target.elements;try{await post("/api/esim/download",{activation_code:f.activation_code.value,smdp:f.smdp.value,matching_id:f.matching_id.value,confirmation_code:f.confirmation_code.value,imei:f.imei.value});toast("Profile 下载完成");loadEsim()}catch(x){toast(x.message)}};
+$("#downloadForm").onsubmit=async e=>{e.preventDefault();const f=e.target.elements,b=e.submitter||e.target.querySelector("button");try{b.disabled=true;b.textContent="正在下载...";await post("/api/esim/download",{activation_code:f.activation_code.value,smdp:f.smdp.value,matching_id:f.matching_id.value,confirmation_code:f.confirmation_code.value,imei:f.imei.value});toast("Profile 下载完成");e.target.reset();await loadEsim()}catch(x){toast(x.message)}finally{b.disabled=false;b.textContent="开始下载"}};
 renderDevices();
 loadDevices();

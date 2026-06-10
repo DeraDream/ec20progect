@@ -100,7 +100,7 @@ ensure_lpac() {
   local machine pattern metadata download_url archive target binary library_path check_output
   if command -v lpac >/dev/null 2>&1 && [[ -x "$(command -v lpac)" ]]; then
     check_output="$(lpac --help 2>&1 || true)"
-    if [[ -n "${check_output}" && "${check_output}" != *"error while loading shared libraries"* ]]; then
+    if lpac_output_is_healthy "${check_output}"; then
       ok "lpac 环境检查通过"
       return
     fi
@@ -109,8 +109,8 @@ ensure_lpac() {
 
   machine="$(uname -m)"
   case "${machine}" in
-    x86_64|amd64) pattern="linux.*(x86_64|amd64).*\\.zip" ;;
-    aarch64|arm64) pattern="linux.*(aarch64|arm64).*\\.zip" ;;
+    x86_64|amd64) pattern="^lpac-linux-x86_64\\.zip$" ;;
+    aarch64|arm64) pattern="^lpac-linux-aarch64\\.zip$" ;;
     *) die "lpac 暂不支持当前 CPU 架构：${machine}" ;;
   esac
   target="${INSTALL_DIR}/tools/lpac"
@@ -147,11 +147,19 @@ EOF
     fi
   fi
   check_output="$(lpac --help 2>&1 || true)"
-  [[ "${check_output}" != *"error while loading shared libraries"* ]] || {
+  lpac_output_is_healthy "${check_output}" || {
     printf '%s\n' "${check_output}" >&2
-    die "lpac 动态库加载失败"
+    die "lpac 无法启动或动态库不兼容"
   }
   ok "lpac 安装并检查通过"
+}
+
+lpac_output_is_healthy() {
+  local output="${1,,}"
+  [[ -n "${output}" &&
+    "${output}" != *"error while loading shared libraries"* &&
+    "${output}" != *"symbol lookup error"* &&
+    "${output}" != *"undefined symbol"* ]]
 }
 
 find_source_root() {
