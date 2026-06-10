@@ -130,16 +130,42 @@ def selected_esim_transport():
         }
     if backend == "QRTR" or (backend == "AUTO" and MODEM.qrtr_available()):
         return port, {"supported": True, "backend": "qmi_qrtr"}, {"backend": "qmi_qrtr"}
-    esim_port, capability = MODEM.find_esim_port(port)
-    if not capability["supported"]:
-        missing = "、".join(capability["unsupported"])
+    candidates = MODEM.sibling_at_ports(port) or [port]
+    capable = []
+    unsupported = []
+    for candidate in candidates:
+        capability = MODEM.esim_capability(candidate)
+        if capability["supported"]:
+            capable.append((candidate, capability))
+        else:
+            unsupported.extend(capability["unsupported"])
+    if not capable:
+        missing = "、".join(dict.fromkeys(unsupported))
         raise EC20Error(
             f"同一设备的 AT 端口均不支持 eSIM 逻辑通道命令：{missing}。"
             "请确认模组固件支持 AT+CCHO、AT+CCHC 和 AT+CGLA"
         )
-    capability["backend"] = "at"
-    capability["auto_reason"] = "未检测到 QMI 控制设备或 QRTR，AUTO 回退到 AT"
-    return esim_port, capability, {"backend": "at"}
+
+    failures = []
+    for candidate, capability in capable:
+        try:
+            ensure_esim_port_available(candidate)
+            probe_info = LPAC.info(candidate, timeout=7, backend="at")
+            capability["backend"] = "at"
+            capability["probe_info"] = probe_info
+            capability["candidate_count"] = len(capable)
+            capability["auto_reason"] = (
+                f"未检测到 QMI 控制设备或 QRTR；已从同一 EC20 的 {len(capable)} 个 AT 候选端口中"
+                "确认可响应 eUICC 的端口"
+            )
+            return candidate, capability, {"backend": "at"}
+        except EC20Error as exc:
+            failures.append(f"{Path(candidate).name}: {exc}")
+    detail = "；".join(failures)
+    raise EC20Error(
+        f"同一 EC20 的 {len(capable)} 个 AT 候选端口均未收到 eUICC 响应。"
+        f"探测结果：{detail}"
+    )
 
 
 def esim_diagnostics():
@@ -249,7 +275,7 @@ class Handler(SimpleHTTPRequestHandler):
                     esim_port, capability, transport = selected_esim_transport()
                     if transport["backend"] == "at":
                         ensure_esim_port_available(esim_port)
-                    info = LPAC.info(esim_port, **transport)
+                    info = capability.pop("probe_info", None) or LPAC.info(esim_port, **transport)
                     profiles = LPAC.profiles(esim_port, **transport)
                 return self.send_json({"info": info, "profiles": profiles, "capability": capability, "port": esim_port})
             return self.send_json({"error": "接口不存在"}, 404)

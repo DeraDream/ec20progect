@@ -138,6 +138,42 @@ class EC20Modem:
         except OSError:
             return ""
 
+    @classmethod
+    def usb_device_path(cls, port):
+        path = cls.usb_path(port)
+        while path and path != "/":
+            if re.search(r":\d+\.\d+$", os.path.basename(path)):
+                return os.path.dirname(path)
+            path = os.path.dirname(path)
+        return ""
+
+    def sibling_at_ports(self, preferred_port):
+        ports = self.at_ports()
+        result = [port for port in ports if self.same_port(port, preferred_port)]
+        usb_device = self.usb_device_path(preferred_port)
+        if usb_device:
+            result.extend(
+                port
+                for port in ports
+                if port not in result and self.usb_device_path(port) == usb_device
+            )
+            return result
+
+        try:
+            preferred_imei = self._value(self.command(preferred_port, "AT+CGSN", timeout=2))
+        except (EC20Error, OSError, termios.error):
+            preferred_imei = ""
+        for port in ports:
+            if port in result:
+                continue
+            try:
+                imei = self._value(self.command(port, "AT+CGSN", timeout=2))
+                if preferred_imei and imei == preferred_imei:
+                    result.append(port)
+            except (EC20Error, OSError, termios.error):
+                continue
+        return result
+
     def status(self, port):
         commands = {
             "manufacturer": "AT+CGMI",
@@ -262,24 +298,15 @@ class EC20Modem:
         return {"supported": not unsupported, "unsupported": unsupported, "responses": results}
 
     def find_esim_port(self, preferred_port):
-        preferred_capability = self.esim_capability(preferred_port)
-        if preferred_capability["supported"]:
-            return preferred_port, preferred_capability
-
-        preferred_imei = self._value(self.command(preferred_port, "AT+CGSN", timeout=2))
-        for port in self.at_ports():
+        candidates = self.sibling_at_ports(preferred_port) or [preferred_port]
+        preferred_capability = None
+        for port in candidates:
+            capability = self.esim_capability(port)
             if self.same_port(port, preferred_port):
-                continue
-            try:
-                imei = self._value(self.command(port, "AT+CGSN", timeout=2))
-                if not preferred_imei or imei != preferred_imei:
-                    continue
-                capability = self.esim_capability(port)
-                if capability["supported"]:
-                    return port, capability
-            except (EC20Error, OSError, termios.error):
-                continue
-        return preferred_port, preferred_capability
+                preferred_capability = capability
+            if capability["supported"]:
+                return port, capability
+        return preferred_port, preferred_capability or self.esim_capability(preferred_port)
 
     @staticmethod
     def port_holders(port):

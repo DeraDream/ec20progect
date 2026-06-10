@@ -37,12 +37,10 @@ class EC20ModemTest(unittest.TestCase):
         self.assertTrue(EC20Modem.qrtr_available())
 
     @patch.object(EC20Modem, "esim_capability")
-    @patch.object(EC20Modem, "command")
-    @patch.object(EC20Modem, "at_ports")
-    def test_find_esim_port_uses_compatible_port_for_same_imei(self, at_ports, command, capability):
+    @patch.object(EC20Modem, "sibling_at_ports")
+    def test_find_esim_port_uses_compatible_sibling_port(self, sibling_at_ports, capability):
         modem = EC20Modem()
-        at_ports.return_value = ["/dev/ttyUSB0", "/dev/ttyUSB2"]
-        command.return_value = "867394046880703\nOK"
+        sibling_at_ports.return_value = ["/dev/ttyUSB0", "/dev/ttyUSB2"]
         capability.side_effect = [
             {"supported": False, "unsupported": ["AT+CCHO=?"], "responses": {}},
             {"supported": True, "unsupported": [], "responses": {}},
@@ -52,6 +50,25 @@ class EC20ModemTest(unittest.TestCase):
 
         self.assertEqual(port, "/dev/ttyUSB2")
         self.assertTrue(result["supported"])
+
+    @patch.object(EC20Modem, "at_ports")
+    @patch.object(EC20Modem, "usb_device_path")
+    def test_sibling_at_ports_groups_ports_by_physical_usb_device(self, usb_device_path, at_ports):
+        modem = EC20Modem()
+        at_ports.return_value = ["/dev/ttyUSB0", "/dev/ttyUSB2", "/dev/ttyUSB4"]
+        usb_device_path.side_effect = {
+            "/dev/ttyUSB0": "/sys/devices/usb1/1-8",
+            "/dev/ttyUSB2": "/sys/devices/usb1/1-8",
+            "/dev/ttyUSB4": "/sys/devices/usb1/1-9",
+        }.get
+
+        self.assertEqual(modem.sibling_at_ports("/dev/ttyUSB2"), ["/dev/ttyUSB2", "/dev/ttyUSB0"])
+
+    @patch.object(EC20Modem, "usb_path")
+    def test_usb_device_path_returns_parent_before_interface(self, usb_path):
+        usb_path.return_value = "/sys/devices/pci/usb1/1-8/1-8:1.2/ttyUSB2"
+
+        self.assertEqual(EC20Modem.usb_device_path("/dev/ttyUSB2"), "/sys/devices/pci/usb1/1-8")
 
     @patch("ec20.glob.glob")
     @patch("ec20.os.path.realpath")
