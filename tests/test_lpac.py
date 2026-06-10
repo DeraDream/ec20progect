@@ -24,6 +24,15 @@ class LpacTest(unittest.TestCase):
 
         self.assertEqual(Lpac.run("/dev/ttyUSB2", "chip", "info"), {"eid": "123"})
 
+    @patch("lpac.Lpac.run")
+    def test_read_operations_use_short_timeout(self, run):
+        Lpac().info("/dev/ttyUSB2")
+        run.assert_called_once_with("/dev/ttyUSB2", "chip", "info", timeout=20)
+
+        run.reset_mock()
+        Lpac().profiles("/dev/ttyUSB2")
+        run.assert_called_once_with("/dev/ttyUSB2", "profile", "list", timeout=20)
+
     @patch("lpac.subprocess.run")
     def test_translates_qmi_symbol_lookup_error(self, run):
         run.return_value = CompletedProcess(

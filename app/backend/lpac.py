@@ -56,11 +56,11 @@ class Lpac:
             raise EC20Error(payload.get("message") or Lpac._friendly_error(stderr or output, process.returncode))
         return payload.get("data", {})
 
-    def info(self, port):
-        return self.run(port, "chip", "info")
+    def info(self, port, timeout=20):
+        return self.run(port, "chip", "info", timeout=timeout)
 
-    def profiles(self, port):
-        return self.run(port, "profile", "list")
+    def profiles(self, port, timeout=20):
+        return self.run(port, "profile", "list", timeout=timeout)
 
     def profile_action(self, port, action, iccid, value=None):
         args = ["profile", action, iccid]

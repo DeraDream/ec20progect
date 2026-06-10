@@ -1,14 +1,21 @@
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const api = async (path, options={}) => {
-  const response = await fetch(path,{headers:{"Content-Type":"application/json"},...options});
-  const data = await response.json();
-  if(!response.ok) throw new Error(data.error || "请求失败");
-  return data;
+  const timeout=options.timeout||0,controller=timeout?new AbortController():null;
+  const timer=controller?setTimeout(()=>controller.abort(),timeout):null;
+  try{
+    const response = await fetch(path,{headers:{"Content-Type":"application/json"},...options,signal:controller?.signal||options.signal});
+    const data = await response.json();
+    if(!response.ok) throw new Error(data.error || "请求失败");
+    return data;
+  }catch(error){
+    if(error.name==="AbortError")throw new Error("请求超时，请检查 eSTK、AT 端口或 lpac 状态");
+    throw error;
+  }finally{if(timer)clearTimeout(timer)}
 };
 const post = (path,data) => api(path,{method:"POST",body:JSON.stringify(data)});
 const toast = text => {$("#toast").textContent=text;$("#toast").classList.add("show");setTimeout(()=>$("#toast").classList.remove("show"),2400)};
-let devices=[], selected=null, scanned=[];
+let devices=[], selected=null, scanned=[], esimLoading=false;
 
 function renderDevices(){
   const keyword=$("#searchInput").value.toLowerCase();
@@ -118,11 +125,12 @@ function renderEsimSummary(info,profiles){
   $("#esimSummary").innerHTML=`<article title="${esc(eid)}"><span>EID</span><b>${esc(eid)}</b></article><article><span>Profile</span><b>${profiles.length} 个</b></article><article><span>已启用</span><b>${enabled} 个</b></article><article><span>eUICC 状态</span><b>${profiles.length?"可用":"未安装 Profile"}</b></article>`;
 }
 async function loadEsim(){
-  if(!selected)return;
+  if(!selected||esimLoading)return;
+  esimLoading=true;
   $("#reloadEsim").disabled=true;$("#reloadEsim").textContent="读取中...";
   $("#profileList").innerHTML=`<div class="empty-state">正在读取 eSIM...</div>`;
   try{
-    const d=await api("/api/esim");
+    const d=await api("/api/esim",{timeout:45000});
     const profiles=profileItems(d.profiles).map(normalizedProfile);
     renderEsimSummary(d.info||{},profiles);
     $("#profileList").innerHTML=profiles.length?profiles.map(profileCard).join(""):`<div class="empty-state">eUICC 已连接，但未发现 Profile<br>可在下方输入激活码下载</div>`;
@@ -130,7 +138,7 @@ async function loadEsim(){
     $("#esimInfo").textContent="eSIM 读取失败";
     $("#esimSummary").innerHTML=`<article><span>EID</span><b>读取失败</b></article><article><span>Profile</span><b>--</b></article><article><span>已启用</span><b>--</b></article><article><span>eUICC 状态</span><b>异常</b></article>`;
     $("#profileList").innerHTML=`<div class="esim-error"><b>无法读取 eSIM</b><span>${esc(e.message)}</span><small>请先确认 eSTK 已插入、AT 端口可用，并执行 ec20 更新检查 lpac。</small></div>`;
-  }finally{$("#reloadEsim").disabled=false;$("#reloadEsim").textContent="刷新"}
+  }finally{esimLoading=false;$("#reloadEsim").disabled=false;$("#reloadEsim").textContent="刷新"}
 }
 function profileCard(p){return `<article class="profile-card"><header><b>${esc(p.name)}</b><span>ICCID ${esc(p.iccid||"未知")}</span></header><div class="profile-row"><i class="dot ${p.enabled?"online":""}"></i><div class="profile-meta"><b>${esc(p.provider)}</b><small>${p.enabled?"已启用":"已禁用"}</small><span class="profile-type">${esc(p.type)}</span></div><div class="profile-actions">${p.enabled?`<button data-action="disable" data-iccid="${esc(p.iccid)}">禁用</button>`:`<button class="enable" data-action="enable" data-iccid="${esc(p.iccid)}">启用</button>`}<button data-action="nickname" data-name="${esc(p.name)}" data-iccid="${esc(p.iccid)}">改名</button><button class="delete" data-action="delete" data-iccid="${esc(p.iccid)}">删除</button></div></div></article>`}
 $("#profileList").onclick=async e=>{const b=e.target.closest("button[data-action]");if(!b||b.disabled)return;let nickname;if(!b.dataset.iccid){toast("该 Profile 没有可用 ICCID");return}if(b.dataset.action==="nickname"){nickname=prompt("输入新的 Profile 名称",b.dataset.name||"");if(nickname===null)return;if(!nickname.trim()){toast("名称不能为空");return}}if(b.dataset.action==="delete"&&!confirm("确定删除该 Profile？此操作不可恢复。"))return;try{b.disabled=true;await post("/api/esim/profile",{action:b.dataset.action,iccid:b.dataset.iccid,nickname});toast("eSIM 操作完成");await loadEsim()}catch(x){toast(x.message);b.disabled=false}};
