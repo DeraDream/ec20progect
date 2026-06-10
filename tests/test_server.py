@@ -14,6 +14,7 @@ class ServerEsimTransportTest(unittest.TestCase):
     def setUp(self):
         self.capability = {"supported": True, "unsupported": [], "responses": {}}
         server.RUNTIME_LOG.path = None
+        server.ESIM_AT_BACKENDS.clear()
 
     @patch.object(server.LPAC, "info")
     @patch.object(server, "ensure_esim_port_available")
@@ -67,7 +68,7 @@ class ServerEsimTransportTest(unittest.TestCase):
     ):
         esim_capability.side_effect = [dict(self.capability), dict(self.capability)]
 
-        with self.assertRaisesRegex(EC20Error, "ttyUSB2: 超时.*ttyUSB0: 超时"):
+        with self.assertRaisesRegex(EC20Error, "ttyUSB2/at: 超时.*ttyUSB0/at: 超时"):
             server.selected_esim_transport()
 
     @patch.object(server.LPAC, "info")
@@ -90,13 +91,45 @@ class ServerEsimTransportTest(unittest.TestCase):
         info,
     ):
         esim_capability.side_effect = [dict(self.capability), dict(self.capability)]
-        info.side_effect = [{}, {"euicc": {"eid": "123"}}]
+        info.side_effect = [{}, {"eidValue": "123"}]
 
         port, capability, transport = server.selected_esim_transport()
 
         self.assertEqual(port, "/dev/ttyUSB0")
-        self.assertEqual(capability["probe_info"], {"euicc": {"eid": "123"}})
+        self.assertEqual(capability["probe_info"], {"eidValue": "123"})
         self.assertEqual(transport, {"backend": "at"})
+
+    @patch.object(server.LPAC, "info")
+    @patch.object(server, "ensure_esim_port_available")
+    @patch.object(server.MODEM, "esim_capability")
+    @patch.object(server.MODEM, "sibling_at_ports", return_value=["/dev/ttyUSB2"])
+    @patch.object(server.MODEM, "qrtr_available", return_value=False)
+    @patch.object(server.MODEM, "control_devices", return_value=[])
+    @patch.object(server, "selected_device", return_value={"esim_backend": "AUTO"})
+    @patch.object(server, "selected_port", return_value="/dev/ttyUSB2")
+    def test_auto_at_retries_chip_info_with_csim(
+        self,
+        selected_port,
+        selected_device,
+        control_devices,
+        qrtr_available,
+        sibling_at_ports,
+        esim_capability,
+        ensure_available,
+        info,
+    ):
+        capability = dict(self.capability)
+        capability["backend"] = "at"
+        capability["responses"] = {"AT+CSIM=?": "OK"}
+        esim_capability.return_value = capability
+        info.side_effect = [{}, {"eidValue": "123"}]
+
+        port, result, transport = server.selected_esim_transport()
+
+        self.assertEqual(port, "/dev/ttyUSB2")
+        self.assertEqual(result["backend"], "at_csim")
+        self.assertEqual(transport, {"backend": "at_csim"})
+        self.assertEqual(server.remembered_at_backend("/dev/ttyUSB2"), "at_csim")
 
     @patch.object(server.LPAC, "profiles", side_effect=EC20Error("Profile 超时"))
     @patch.object(server, "ensure_esim_port_available")
@@ -114,9 +147,15 @@ class ServerEsimTransportTest(unittest.TestCase):
 
         self.assertEqual(result["info"], {"eid": "123"})
         self.assertEqual(result["profiles"], [])
-        self.assertEqual(result["profiles_error"], "Profile 超时")
+        self.assertRegex(result["profiles_error"], "ttyUSB0: Profile 超时.*ttyUSB0/CSIM: Profile 超时")
         self.assertNotIn("probe_info", result["capability"])
-        profiles.assert_called_once_with("/dev/ttyUSB0", timeout=45, backend="at")
+        self.assertEqual(
+            profiles.call_args_list,
+            [
+                call("/dev/ttyUSB0", timeout=45, backend="at"),
+                call("/dev/ttyUSB0", timeout=30, backend="at_csim"),
+            ],
+        )
 
     @patch.object(server.LPAC, "profiles", return_value=[])
     @patch.object(
@@ -159,7 +198,7 @@ class ServerEsimTransportTest(unittest.TestCase):
     def test_read_esim_retries_profile_on_sibling_at_port(
         self, selected_transport, same_port, ensure_available, profiles
     ):
-        profiles.side_effect = [EC20Error("主端口超时"), [{"iccid": "8986"}]]
+        profiles.side_effect = [EC20Error("主端口超时"), EC20Error("CSIM 超时"), [{"iccid": "8986"}]]
 
         result = server.read_esim()
 
@@ -171,9 +210,26 @@ class ServerEsimTransportTest(unittest.TestCase):
             profiles.call_args_list,
             [
                 call("/dev/ttyUSB2", timeout=45, backend="at"),
+                call("/dev/ttyUSB2", timeout=30, backend="at_csim"),
                 call("/dev/ttyUSB0", timeout=30, backend="at"),
             ],
         )
+
+    @patch.object(server.LPAC, "profiles")
+    @patch.object(server.MODEM, "same_port", side_effect=lambda first, second: first == second)
+    def test_profile_retry_uses_and_remembers_csim_backend(self, same_port, profiles):
+        profiles.return_value = [{"iccid": "8986"}]
+
+        result = server.retry_profiles_on_at_candidates(
+            "/dev/ttyUSB2",
+            {"at_candidates": ["/dev/ttyUSB2"]},
+            {"backend": "at"},
+            EC20Error("CGLA 超时"),
+        )
+
+        self.assertEqual(result[0], [{"iccid": "8986"}])
+        self.assertEqual(server.remembered_at_backend("/dev/ttyUSB2"), "at_csim")
+        profiles.assert_called_once_with("/dev/ttyUSB2", timeout=30, backend="at_csim")
 
     @patch.object(server.LPAC, "profiles")
     @patch.object(server, "ensure_esim_port_available")

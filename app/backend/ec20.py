@@ -148,10 +148,11 @@ class EC20Modem:
         return ""
 
     def sibling_at_ports(self, preferred_port):
-        ports = self.at_ports()
-        result = [port for port in ports if self.same_port(port, preferred_port)]
+        at_ports = self.at_ports()
+        result = [port for port in at_ports if self.same_port(port, preferred_port)]
         usb_device = self.usb_device_path(preferred_port)
         if usb_device:
+            ports = self.ports()
             result.extend(
                 port
                 for port in ports
@@ -159,6 +160,7 @@ class EC20Modem:
             )
             return result
 
+        ports = at_ports
         try:
             preferred_imei = self._value(self.command(preferred_port, "AT+CGSN", timeout=2))
         except (EC20Error, OSError, termios.error):
@@ -286,7 +288,8 @@ class EC20Modem:
         return states.get(raw.upper(), raw)
 
     def esim_capability(self, port):
-        required = ("AT+CCHO=?", "AT+CCHC=?", "AT+CGLA=?")
+        managed = ("AT+CCHO=?", "AT+CCHC=?", "AT+CGLA=?")
+        required = (*managed, "AT+CSIM=?")
         results = {}
         for command in required:
             try:
@@ -294,8 +297,16 @@ class EC20Modem:
             except Exception as exc:
                 response = f"ERROR: {exc}"
             results[command] = response
-        unsupported = [command for command, response in results.items() if not self._command_ok(response)]
-        return {"supported": not unsupported, "unsupported": unsupported, "responses": results}
+        managed_unsupported = [command for command in managed if not self._command_ok(results[command])]
+        csim_supported = self._command_ok(results["AT+CSIM=?"])
+        backend = "at" if not managed_unsupported else "at_csim" if csim_supported else ""
+        unsupported = [] if backend else [*managed_unsupported, "AT+CSIM=?"]
+        return {
+            "supported": bool(backend),
+            "backend": backend,
+            "unsupported": unsupported,
+            "responses": results,
+        }
 
     def find_esim_port(self, preferred_port):
         candidates = self.sibling_at_ports(preferred_port) or [preferred_port]

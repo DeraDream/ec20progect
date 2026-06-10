@@ -145,7 +145,7 @@ function normalizedProfile(profile){
   };
 }
 function renderEsimSummary(info,profiles,capability={},profilesError=""){
-  const eid=deepValue(info,["eid"])||"未提供";
+  const eid=deepValue(info,["eid","eidvalue"])||"未提供";
   const name=deepValue(info,["applicationname","application_name"])||"eSTK / eSIM";
   const enabled=profiles.filter(p=>p.enabled).length;
   $("#esimName").textContent=name;

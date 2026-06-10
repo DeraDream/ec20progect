@@ -38,11 +38,12 @@ class Lpac:
 
     @staticmethod
     def _timeout_detail(output):
-        debug_lines = [
-            line.split("AT_DEBUG:", 1)[1].strip()
-            for line in (output or "").splitlines()
-            if "AT_DEBUG:" in line
-        ]
+        debug_lines = []
+        for line in (output or "").splitlines():
+            if "AT_DEBUG:" in line:
+                debug_lines.append(line.split("AT_DEBUG:", 1)[1].strip())
+            elif "AT_DEBUG_TX" in line:
+                debug_lines.append(line.split(":", 1)[1].strip())
         last_command = next((line for line in reversed(debug_lines) if line.startswith("AT+")), "")
         if last_command.startswith("AT+CCHO"):
             return "打开 eUICC ISD-R 逻辑通道时无响应"
@@ -61,7 +62,7 @@ class Lpac:
             "AT_DEVICE": port,
             "LPAC_HTTP": "curl",
         })
-        if backend == "at":
+        if backend in ("at", "at_csim"):
             env["LPAC_APDU_AT_DEBUG"] = "true"
         if backend in ("qmi", "qmi_qrtr"):
             env["LPAC_APDU_QMI_UIM_SLOT"] = "1"

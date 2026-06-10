@@ -24,6 +24,7 @@ MODEM = EC20Modem()
 LPAC = Lpac()
 Lpac.logger = RUNTIME_LOG.write
 ESIM_LOCK = threading.Lock()
+ESIM_AT_BACKENDS = {}
 
 
 def read_config():
@@ -132,6 +133,18 @@ def deep_value(value, key):
     return ""
 
 
+def euicc_eid(info):
+    return deep_value(info, "eidValue") or deep_value(info, "eid")
+
+
+def remembered_at_backend(port):
+    return ESIM_AT_BACKENDS.get(os.path.realpath(port), "at")
+
+
+def remember_at_backend(port, backend):
+    ESIM_AT_BACKENDS[os.path.realpath(port)] = backend
+
+
 def selected_esim_transport():
     port = selected_port()
     if not port:
@@ -153,15 +166,28 @@ def selected_esim_transport():
     if backend == "QRTR" or (backend == "AUTO" and MODEM.qrtr_available()):
         return port, {"supported": True, "backend": "qmi_qrtr"}, {"backend": "qmi_qrtr"}
     candidates = MODEM.sibling_at_ports(port) or [port]
+    RUNTIME_LOG.write("esim", f"同一 USB 设备串口候选：{', '.join(candidates)}")
     capable = []
     unsupported = []
+    candidate_diagnostics = {}
     for candidate in candidates:
         capability = MODEM.esim_capability(candidate)
+        candidate_diagnostics[Path(candidate).name] = capability["responses"]
+        RUNTIME_LOG.write(
+            "esim",
+            f"AT candidate {candidate} capability={json.dumps(capability['responses'], ensure_ascii=False)}",
+            "DEBUG",
+        )
         if capability["supported"]:
             capable.append((candidate, capability))
         else:
             unsupported.extend(capability["unsupported"])
     if not capable:
+        RUNTIME_LOG.write(
+            "esim",
+            f"没有串口完整支持逻辑通道命令：{json.dumps(candidate_diagnostics, ensure_ascii=False)}",
+            "ERROR",
+        )
         missing = "、".join(dict.fromkeys(unsupported))
         raise EC20Error(
             f"同一设备的 AT 端口均不支持 eSIM 逻辑通道命令：{missing}。"
@@ -170,33 +196,40 @@ def selected_esim_transport():
 
     failures = []
     for candidate, capability in capable:
-        try:
-            RUNTIME_LOG.write("esim", f"探测 AT eSIM 端口 {candidate}")
-            ensure_esim_port_available(candidate)
-            probe_info = LPAC.info(candidate, timeout=7, backend="at")
-            RUNTIME_LOG.write(
-                "esim",
-                f"AT 端口 {candidate} chip info={json.dumps(probe_info, ensure_ascii=False)}",
-                "DEBUG",
-            )
-            if not deep_value(probe_info, "eid"):
-                raise EC20Error("chip info 未返回 EID，不能确认该端口已连接 eUICC")
-            capability["backend"] = "at"
-            capability["probe_info"] = probe_info
-            capability["candidate_count"] = len(capable)
-            capability["at_candidates"] = [item[0] for item in capable]
-            capability["auto_reason"] = (
-                f"未检测到 QMI 控制设备或 QRTR；已从同一 EC20 的 {len(capable)} 个 AT 候选端口中"
-                "确认可响应 eUICC 的端口"
-            )
-            return candidate, capability, {"backend": "at"}
-        except EC20Error as exc:
-            RUNTIME_LOG.write("esim", f"AT eSIM 端口 {candidate} 探测失败：{exc}", "WARN")
-            failures.append(f"{Path(candidate).name}: {exc}")
+        preferred_backend = ESIM_AT_BACKENDS.get(os.path.realpath(candidate)) or capability.get("backend") or "at"
+        backends = [preferred_backend]
+        if preferred_backend != "at_csim" and MODEM._command_ok(capability["responses"].get("AT+CSIM=?", "")):
+            backends.append("at_csim")
+        for at_backend in backends:
+            try:
+                RUNTIME_LOG.write("esim", f"探测 eSIM 端口 {candidate}，后端={at_backend}")
+                ensure_esim_port_available(candidate)
+                probe_info = LPAC.info(candidate, timeout=7, backend=at_backend)
+                RUNTIME_LOG.write(
+                    "esim",
+                    f"AT 端口 {candidate} 后端={at_backend} chip info={json.dumps(probe_info, ensure_ascii=False)}",
+                    "DEBUG",
+                )
+                if not euicc_eid(probe_info):
+                    raise EC20Error("chip info 未返回 EID，不能确认该端口已连接 eUICC")
+                remember_at_backend(candidate, at_backend)
+                capability["backend"] = at_backend
+                capability["probe_info"] = probe_info
+                capability["candidate_count"] = len(capable)
+                capability["at_candidates"] = [item[0] for item in capable]
+                capability["auto_reason"] = (
+                    f"未检测到 QMI 控制设备或 QRTR；已从同一 EC20 的 {len(capable)} 个 AT 候选端口中"
+                    "确认可响应 eUICC 的端口"
+                )
+                return candidate, capability, {"backend": at_backend}
+            except EC20Error as exc:
+                RUNTIME_LOG.write("esim", f"eSIM 端口 {candidate} 后端={at_backend} 探测失败：{exc}", "WARN")
+                failures.append(f"{Path(candidate).name}/{at_backend}: {exc}")
     detail = "；".join(failures)
+    diagnostics = json.dumps(candidate_diagnostics, ensure_ascii=False)
     raise EC20Error(
         f"同一 EC20 的 {len(capable)} 个 AT 候选端口均未收到 eUICC 响应。"
-        f"探测结果：{detail}"
+        f"探测结果：{detail}。逻辑通道诊断：{diagnostics}"
     )
 
 
@@ -256,15 +289,15 @@ def ensure_esim_port_available(port):
 
 def read_esim():
     esim_port, capability, transport = selected_esim_transport()
-    if transport["backend"] == "at":
+    if transport["backend"] in ("at", "at_csim"):
         ensure_esim_port_available(esim_port)
     info = capability.pop("probe_info", None) or LPAC.info(esim_port, **transport)
-    if not deep_value(info, "eid"):
+    if not euicc_eid(info):
         raise EC20Error("chip info 未返回 EID，当前通道未真正识别到 eUICC")
     RUNTIME_LOG.write("esim", f"已读取 eUICC 基础信息，端口={esim_port}，后端={transport['backend']}")
     profile_port = esim_port
     try:
-        profile_timeout = 45 if transport["backend"] == "at" else 20
+        profile_timeout = 45 if transport["backend"] in ("at", "at_csim") else 20
         profiles = LPAC.profiles(esim_port, timeout=profile_timeout, **transport)
         profiles_error = ""
         RUNTIME_LOG.write("esim", "Profile 列表读取完成")
@@ -283,11 +316,23 @@ def read_esim():
 
 def retry_profiles_on_at_candidates(esim_port, capability, transport, first_error):
     failures = [f"{Path(esim_port).name}: {first_error}"]
-    candidates = capability.get("at_candidates", []) if transport["backend"] == "at" else []
+    candidates = capability.get("at_candidates", []) if transport["backend"] in ("at", "at_csim") else []
     remaining = [port for port in candidates if not MODEM.same_port(port, esim_port)][:2]
+    if transport["backend"] == "at":
+        try:
+            RUNTIME_LOG.write("esim", f"CCHO/CGLA 读取失败，尝试在 {esim_port} 使用 AT+CSIM 后端", "WARN")
+            profiles = LPAC.profiles(esim_port, timeout=30, backend="at_csim")
+            RUNTIME_LOG.write("esim", f"AT+CSIM 后端在 {esim_port} 读取 Profile 完成")
+            capability["profile_fallback_backend"] = "at_csim"
+            remember_at_backend(esim_port, "at_csim")
+            return profiles, esim_port, ""
+        except EC20Error as exc:
+            failures.append(f"{Path(esim_port).name}/CSIM: {exc}")
+            RUNTIME_LOG.write("esim", f"AT+CSIM 后端读取失败：{exc}", "WARN")
     if not remaining:
-        RUNTIME_LOG.write("esim", f"Profile 列表读取失败：{first_error}", "ERROR")
-        return [], esim_port, str(first_error)
+        error = "；".join(failures)
+        RUNTIME_LOG.write("esim", f"Profile 列表读取失败：{error}", "ERROR")
+        return [], esim_port, error
 
     RUNTIME_LOG.write(
         "esim",
@@ -305,6 +350,16 @@ def retry_profiles_on_at_candidates(esim_port, capability, transport, first_erro
         except EC20Error as exc:
             failures.append(f"{Path(candidate).name}: {exc}")
             RUNTIME_LOG.write("esim", f"备用端口 {candidate} Profile 读取失败：{exc}", "WARN")
+        try:
+            RUNTIME_LOG.write("esim", f"尝试从备用端口 {candidate} 使用 AT+CSIM 读取 Profile")
+            profiles = LPAC.profiles(candidate, timeout=30, backend="at_csim")
+            capability["profile_fallback_port"] = candidate
+            capability["profile_fallback_backend"] = "at_csim"
+            remember_at_backend(candidate, "at_csim")
+            return profiles, candidate, ""
+        except EC20Error as exc:
+            failures.append(f"{Path(candidate).name}/CSIM: {exc}")
+            RUNTIME_LOG.write("esim", f"备用端口 {candidate} AT+CSIM 读取失败：{exc}", "WARN")
     detail = "；".join(failures)
     error = f"同设备 AT 端口均无法读取 Profile：{detail}"
     RUNTIME_LOG.write("esim", error, "ERROR")
@@ -480,7 +535,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/esim/profile":
                 with esim_operation():
                     esim_port, _, transport = selected_esim_transport()
-                    if transport["backend"] == "at":
+                    if transport["backend"] in ("at", "at_csim"):
                         ensure_esim_port_available(esim_port)
                     action = str(data.get("action", ""))
                     if action not in ("enable", "disable", "delete", "nickname"):
@@ -491,7 +546,7 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/esim/download":
                 with esim_operation():
                     esim_port, _, transport = selected_esim_transport()
-                    if transport["backend"] == "at":
+                    if transport["backend"] in ("at", "at_csim"):
                         ensure_esim_port_available(esim_port)
                     if not str(data.get("imei", "")).strip():
                         data["imei"] = MODEM.status(port).get("imei_clean", "")

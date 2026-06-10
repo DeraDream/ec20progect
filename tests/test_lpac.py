@@ -98,6 +98,27 @@ class LpacTest(unittest.TestCase):
             Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
 
     @patch("lpac.subprocess.Popen")
+    def test_timeout_reports_current_lpac_debug_format(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"], stderr='AT_DEBUG_TX(1.2): AT+CGLA=1,10,"80E2910006"\n', timeout=True
+        )
+
+        with self.assertRaisesRegex(EC20Error, "eUICC APDU 无响应"):
+            Lpac.run("/dev/ttyUSB2", "chip", "info", timeout=20)
+
+    @patch("lpac.subprocess.Popen")
+    def test_at_csim_enables_at_debug(self, popen):
+        popen.return_value = FakePopen(
+            ["lpac"], stdout=json.dumps({"payload": {"code": 0, "data": []}})
+        )
+
+        Lpac.run("/dev/ttyUSB2", "profile", "list", backend="at_csim")
+
+        env = popen.call_args.kwargs["env"]
+        self.assertEqual(env["LPAC_APDU"], "at_csim")
+        self.assertEqual(env["LPAC_APDU_AT_DEBUG"], "true")
+
+    @patch("lpac.subprocess.Popen")
     def test_streams_lpac_output_to_logger(self, popen):
         popen.return_value = FakePopen(
             ["lpac"],

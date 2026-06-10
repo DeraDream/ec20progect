@@ -51,11 +51,22 @@ class EC20ModemTest(unittest.TestCase):
         self.assertEqual(port, "/dev/ttyUSB2")
         self.assertTrue(result["supported"])
 
+    @patch.object(EC20Modem, "command")
+    def test_esim_capability_accepts_csim_only_port(self, command):
+        command.side_effect = ["ERROR", "ERROR", "ERROR", "OK"]
+
+        result = EC20Modem().esim_capability("/dev/ttyUSB0")
+
+        self.assertTrue(result["supported"])
+        self.assertEqual(result["backend"], "at_csim")
+
+    @patch.object(EC20Modem, "ports")
     @patch.object(EC20Modem, "at_ports")
     @patch.object(EC20Modem, "usb_device_path")
-    def test_sibling_at_ports_groups_ports_by_physical_usb_device(self, usb_device_path, at_ports):
+    def test_sibling_at_ports_groups_ports_by_physical_usb_device(self, usb_device_path, at_ports, ports):
         modem = EC20Modem()
-        at_ports.return_value = ["/dev/ttyUSB0", "/dev/ttyUSB2", "/dev/ttyUSB4"]
+        at_ports.return_value = ["/dev/ttyUSB2", "/dev/ttyUSB4"]
+        ports.return_value = ["/dev/ttyUSB0", "/dev/ttyUSB2", "/dev/ttyUSB4"]
         usb_device_path.side_effect = {
             "/dev/ttyUSB0": "/sys/devices/usb1/1-8",
             "/dev/ttyUSB2": "/sys/devices/usb1/1-8",
