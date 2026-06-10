@@ -142,8 +142,12 @@ class EC20Modem:
     def usb_device_path(cls, port):
         path = cls.usb_path(port)
         while path and path != "/":
+            if os.path.exists(os.path.join(path, "idVendor")) and os.path.exists(os.path.join(path, "idProduct")):
+                return path
             if re.search(r":\d+\.\d+$", os.path.basename(path)):
-                return os.path.dirname(path)
+                parent = os.path.dirname(path)
+                if parent:
+                    return parent
             path = os.path.dirname(path)
         return ""
 

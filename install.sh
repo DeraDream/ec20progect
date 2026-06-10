@@ -366,11 +366,33 @@ show_logs() {
   tail -n 200 -f "${log_file}"
 }
 
+show_ports() {
+  printf '\n串口设备：\n'
+  for device in /dev/ttyUSB* /dev/ttyACM*; do
+    [[ -e "${device}" ]] || continue
+    printf '%-24s -> %s\n' "${device}" "$(readlink -f "${device}")"
+  done
+  printf '\n稳定串口别名：\n'
+  if [[ -d /dev/serial/by-id ]]; then
+    for device in /dev/serial/by-id/*; do
+      [[ -e "${device}" ]] || continue
+      printf '%-60s -> %s\n' "${device}" "$(readlink -f "${device}")"
+    done
+  else
+    printf '无 /dev/serial/by-id 目录\n'
+  fi
+  printf '\nUSB 串口驱动：\n'
+  for tty_path in /sys/class/tty/ttyUSB* /sys/class/tty/ttyACM*; do
+    [[ -e "${tty_path}" ]] || continue
+    printf '%-16s %s\n' "$(basename "${tty_path}")" "$(readlink -f "${tty_path}/device")"
+  done
+}
+
 show_menu() {
   while true; do
     printf '\n========== EC20 管理菜单 ==========\n'
-    printf '1. 安装脚本\n2. 更新脚本\n3. 卸载脚本\n4. 查看实时日志\n5. 退出\n'
-    read -r -p "请选择 [1-5]：" choice
+    printf '1. 安装脚本\n2. 更新脚本\n3. 卸载脚本\n4. 查看实时日志\n5. 查看串口设备\n6. 退出\n'
+    read -r -p "请选择 [1-6]：" choice
     case "${choice}" in
       1) install_or_update install ;;
       2)
@@ -379,8 +401,9 @@ show_menu() {
         ;;
       3) uninstall_project ;;
       4) show_logs ;;
-      5) exit 0 ;;
-      *) warn "请输入 1、2、3、4 或 5" ;;
+      5) show_ports ;;
+      6) exit 0 ;;
+      *) warn "请输入 1、2、3、4、5 或 6" ;;
     esac
   done
 }
@@ -396,6 +419,7 @@ main() {
     --update) install_or_update update ;;
     --uninstall) uninstall_project ;;
     --logs) show_logs ;;
+    --ports) show_ports ;;
     "") show_menu ;;
     *) die "未知参数：$1" ;;
   esac

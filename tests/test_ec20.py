@@ -81,6 +81,17 @@ class EC20ModemTest(unittest.TestCase):
 
         self.assertEqual(EC20Modem.usb_device_path("/dev/ttyUSB2"), "/sys/devices/pci/usb1/1-8")
 
+    @patch("ec20.os.path.exists")
+    @patch.object(EC20Modem, "usb_path")
+    def test_usb_device_path_uses_usb_identity_files(self, usb_path, exists):
+        usb_path.return_value = "/sys/devices/pci/usb1/1-8/1-8:1.10/ttyUSB2"
+        exists.side_effect = lambda path: path in (
+            "/sys/devices/pci/usb1/1-8/idVendor",
+            "/sys/devices/pci/usb1/1-8/idProduct",
+        )
+
+        self.assertEqual(EC20Modem.usb_device_path("/dev/ttyUSB2"), "/sys/devices/pci/usb1/1-8")
+
     @patch("ec20.glob.glob")
     @patch("ec20.os.path.realpath")
     @patch("ec20.os.path.isdir")

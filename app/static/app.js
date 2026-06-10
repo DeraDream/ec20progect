@@ -78,6 +78,7 @@ function formData(form=$("#configForm")){
 }
 function switchTab(id){document.querySelectorAll(".tabs button,.tab").forEach(x=>x.classList.remove("active"));document.querySelector(`[data-tab="${id}"]`).classList.add("active");$(`#${id}`).classList.add("active");if(id==="esim")loadEsim();if(id==="logs")startLogs();else stopLogs()}
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+$("#sidebarLogs").onclick=()=>{if(!selected){toast("请先选择设备");return}switchTab("logs");document.querySelector(".detail").scrollIntoView({behavior:"smooth",block:"start"})};
 $("#searchInput").oninput=renderDevices;
 $("#refreshButton").onclick=loadDevices;$("#scanButton").onclick=()=>scan(true);$("#addButton").onclick=()=>scan(true);$("#closeModal").onclick=()=>$("#modal").classList.remove("open");
 $("#cancelAdd").onclick=()=>$("#modal").classList.remove("open");

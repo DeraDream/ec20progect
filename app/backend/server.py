@@ -166,6 +166,7 @@ def selected_esim_transport():
     if backend == "QRTR" or (backend == "AUTO" and MODEM.qrtr_available()):
         return port, {"supported": True, "backend": "qmi_qrtr"}, {"backend": "qmi_qrtr"}
     candidates = MODEM.sibling_at_ports(port) or [port]
+    RUNTIME_LOG.write("esim", f"系统全部串口：{', '.join(MODEM.ports())}")
     RUNTIME_LOG.write("esim", f"同一 USB 设备串口候选：{', '.join(candidates)}")
     capable = []
     unsupported = []

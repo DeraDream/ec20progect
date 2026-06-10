@@ -35,6 +35,12 @@ sudo ec20 --logs
 
 日志文件位于 `/opt/ec20-manager/logs/ec20-manager.log`，Web 设备页面也提供只读“实时日志”终端。
 
+查看系统识别到的全部 ttyUSB/ttyACM 串口及稳定别名：
+
+```bash
+sudo ec20 --ports
+```
+
 菜单功能：
 
 1. 安装脚本
