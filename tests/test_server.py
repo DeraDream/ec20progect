@@ -173,7 +173,7 @@ class ServerEsimTransportTest(unittest.TestCase):
         self.assertEqual(
             profiles.call_args_list,
             [
-                call("/dev/ttyUSB0", timeout=45, backend="at"),
+                call("/dev/ttyUSB0", timeout=20, backend="at"),
                 call("/dev/ttyUSB0", timeout=30, backend="at_csim"),
             ],
         )
@@ -230,7 +230,7 @@ class ServerEsimTransportTest(unittest.TestCase):
         self.assertEqual(
             profiles.call_args_list,
             [
-                call("/dev/ttyUSB2", timeout=45, backend="at"),
+                call("/dev/ttyUSB2", timeout=20, backend="at"),
                 call("/dev/ttyUSB2", timeout=30, backend="at_csim"),
                 call("/dev/ttyUSB0", timeout=30, backend="at"),
             ],

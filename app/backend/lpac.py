@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import threading
 
@@ -44,6 +45,8 @@ class Lpac:
                 debug_lines.append(line.split("AT_DEBUG:", 1)[1].strip())
             elif "AT_DEBUG_TX" in line:
                 debug_lines.append(line.split(":", 1)[1].strip())
+            elif "APDU" in line.upper():
+                debug_lines.append(line.strip())
         last_command = next((line for line in reversed(debug_lines) if line.startswith("AT+")), "")
         if last_command.startswith("AT+CCHO"):
             return "打开 eUICC ISD-R 逻辑通道时无响应"
@@ -51,6 +54,8 @@ class Lpac:
             return "逻辑通道已打开，但 eUICC APDU 无响应"
         if last_command.startswith("AT+CCHC"):
             return "关闭旧逻辑通道时无响应"
+        if debug_lines:
+            return f"最后调试信息：{debug_lines[-1]}"
         return "未收到 eUICC 响应"
 
     @staticmethod
@@ -61,6 +66,7 @@ class Lpac:
             "LPAC_APDU_AT_DEVICE": port,
             "AT_DEVICE": port,
             "LPAC_HTTP": "curl",
+            "LIBEUICC_DEBUG_APDU": "true",
         })
         if backend in ("at", "at_csim"):
             env["LPAC_APDU_AT_DEBUG"] = "true"
@@ -68,7 +74,10 @@ class Lpac:
             env["LPAC_APDU_QMI_UIM_SLOT"] = "1"
         if backend == "qmi":
             env["LPAC_APDU_QMI_DEVICE"] = control_device
-        command = ["lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac", *args]
+        binary = "lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac"
+        command = [binary, *args]
+        if shutil.which("stdbuf"):
+            command = ["stdbuf", "-oL", "-eL", *command]
         operation = " ".join(args[:2])
         Lpac._log(f"开始 {operation}，后端={backend}，端口={port}，超时={timeout}s")
         try:
@@ -83,8 +92,7 @@ class Lpac:
                 bufsize=1,
             )
         except FileNotFoundError as exc:
-            name = "lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac"
-            raise EC20Error(f"系统未安装 {name}，请执行 ec20 更新") from exc
+            raise EC20Error(f"系统未安装 {binary}，请执行 ec20 更新") from exc
         stdout_lines = []
         stderr_lines = []
         readers = [

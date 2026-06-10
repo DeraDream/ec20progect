@@ -172,6 +172,17 @@ def selected_esim_transport():
     if configured_esim_port and not any(MODEM.same_port(configured_esim_port, item) for item in MODEM.ports()):
         RUNTIME_LOG.write("esim", f"Configured eSIM AT port is unavailable: {configured_esim_port}", "WARN")
         configured_esim_port = ""
+    if configured_esim_port:
+        try:
+            if "OK" not in MODEM.command(configured_esim_port, "AT", timeout=1):
+                raise EC20Error("AT did not return OK")
+        except Exception as exc:
+            RUNTIME_LOG.write(
+                "esim",
+                f"Configured eSIM AT port does not respond to AT; ignoring {configured_esim_port}: {exc}",
+                "WARN",
+            )
+            configured_esim_port = ""
     port = configured_esim_port or status_port
     backend = str(device.get("esim_backend", "AUTO")).upper()
     RUNTIME_LOG.write("esim", f"status AT={status_port}, preferred eSIM AT={port}, backend={backend}")
@@ -327,7 +338,7 @@ def read_esim():
     RUNTIME_LOG.write("esim", f"已读取 eUICC 基础信息，端口={esim_port}，后端={transport['backend']}")
     profile_port = esim_port
     try:
-        profile_timeout = 45 if transport["backend"] in ("at", "at_csim") else 20
+        profile_timeout = 20
         profiles = LPAC.profiles(esim_port, timeout=profile_timeout, **transport)
         profiles_error = ""
         RUNTIME_LOG.write("esim", "Profile 列表读取完成")
@@ -500,6 +511,8 @@ class Handler(SimpleHTTPRequestHandler):
                 if esim_at_port and not any(MODEM.same_port(esim_at_port, item) for item in MODEM.ports()):
                     raise EC20Error("eSIM AT port does not exist")
                 if esim_at_port:
+                    if "OK" not in MODEM.command(esim_at_port, "AT", timeout=2):
+                        raise EC20Error("eSIM AT port does not respond to AT")
                     status_usb = MODEM.usb_device_path(port)
                     esim_usb = MODEM.usb_device_path(esim_at_port)
                     if status_usb and esim_usb and status_usb != esim_usb:

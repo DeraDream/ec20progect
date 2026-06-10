@@ -35,8 +35,9 @@ class LpacTest(unittest.TestCase):
     def setUp(self):
         Lpac.logger = None
 
+    @patch("lpac.shutil.which", return_value=None)
     @patch("lpac.subprocess.Popen")
-    def test_returns_payload_data(self, popen):
+    def test_returns_payload_data(self, popen, which):
         popen.return_value = FakePopen(
             ["lpac"], stdout=json.dumps({"payload": {"code": 0, "data": {"eid": "123"}}})
         )
@@ -45,9 +46,22 @@ class LpacTest(unittest.TestCase):
         env = popen.call_args.kwargs["env"]
         self.assertEqual(env["LPAC_APDU"], "at")
         self.assertEqual(env["LPAC_APDU_AT_DEVICE"], "/dev/ttyUSB2")
+        self.assertEqual(env["LIBEUICC_DEBUG_APDU"], "true")
 
+    @patch("lpac.shutil.which", return_value="/usr/bin/stdbuf")
     @patch("lpac.subprocess.Popen")
-    def test_qmi_uses_separate_binary_and_transport(self, popen):
+    def test_uses_stdbuf_for_realtime_lpac_logs(self, popen, which):
+        popen.return_value = FakePopen(
+            ["lpac"], stdout=json.dumps({"payload": {"code": 0, "data": []}})
+        )
+
+        Lpac.run("/dev/ttyUSB2", "profile", "list")
+
+        self.assertEqual(popen.call_args.args[0][:4], ["stdbuf", "-oL", "-eL", "lpac"])
+
+    @patch("lpac.shutil.which", return_value=None)
+    @patch("lpac.subprocess.Popen")
+    def test_qmi_uses_separate_binary_and_transport(self, popen, which):
         popen.return_value = FakePopen(
             ["lpac-qmi"], stdout=json.dumps({"payload": {"code": 0, "data": []}})
         )
