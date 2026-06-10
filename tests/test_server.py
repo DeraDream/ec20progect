@@ -1,7 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app" / "backend"))
@@ -43,6 +43,7 @@ class ServerEsimTransportTest(unittest.TestCase):
         self.assertEqual(port, "/dev/ttyUSB0")
         self.assertEqual(capability["probe_info"], {"eid": "123"})
         self.assertEqual(capability["candidate_count"], 2)
+        self.assertEqual(capability["at_candidates"], ["/dev/ttyUSB2", "/dev/ttyUSB0"])
         self.assertEqual(transport, {"backend": "at"})
 
     @patch.object(server.LPAC, "info", side_effect=EC20Error("超时"))
@@ -68,6 +69,34 @@ class ServerEsimTransportTest(unittest.TestCase):
 
         with self.assertRaisesRegex(EC20Error, "ttyUSB2: 超时.*ttyUSB0: 超时"):
             server.selected_esim_transport()
+
+    @patch.object(server.LPAC, "info")
+    @patch.object(server, "ensure_esim_port_available")
+    @patch.object(server.MODEM, "esim_capability")
+    @patch.object(server.MODEM, "sibling_at_ports", return_value=["/dev/ttyUSB2", "/dev/ttyUSB0"])
+    @patch.object(server.MODEM, "qrtr_available", return_value=False)
+    @patch.object(server.MODEM, "control_devices", return_value=[])
+    @patch.object(server, "selected_device", return_value={"esim_backend": "AUTO"})
+    @patch.object(server, "selected_port", return_value="/dev/ttyUSB2")
+    def test_auto_at_rejects_chip_info_without_eid(
+        self,
+        selected_port,
+        selected_device,
+        control_devices,
+        qrtr_available,
+        sibling_at_ports,
+        esim_capability,
+        ensure_available,
+        info,
+    ):
+        esim_capability.side_effect = [dict(self.capability), dict(self.capability)]
+        info.side_effect = [{}, {"euicc": {"eid": "123"}}]
+
+        port, capability, transport = server.selected_esim_transport()
+
+        self.assertEqual(port, "/dev/ttyUSB0")
+        self.assertEqual(capability["probe_info"], {"euicc": {"eid": "123"}})
+        self.assertEqual(transport, {"backend": "at"})
 
     @patch.object(server.LPAC, "profiles", side_effect=EC20Error("Profile 超时"))
     @patch.object(server, "ensure_esim_port_available")
@@ -109,6 +138,58 @@ class ServerEsimTransportTest(unittest.TestCase):
             backend="qmi",
             control_device="/dev/cdc-wdm0",
         )
+
+    @patch.object(server.LPAC, "profiles")
+    @patch.object(server, "ensure_esim_port_available")
+    @patch.object(server.MODEM, "same_port", side_effect=lambda first, second: first == second)
+    @patch.object(
+        server,
+        "selected_esim_transport",
+        return_value=(
+            "/dev/ttyUSB2",
+            {
+                "supported": True,
+                "backend": "at",
+                "probe_info": {"eid": "123"},
+                "at_candidates": ["/dev/ttyUSB2", "/dev/ttyUSB0"],
+            },
+            {"backend": "at"},
+        ),
+    )
+    def test_read_esim_retries_profile_on_sibling_at_port(
+        self, selected_transport, same_port, ensure_available, profiles
+    ):
+        profiles.side_effect = [EC20Error("主端口超时"), [{"iccid": "8986"}]]
+
+        result = server.read_esim()
+
+        self.assertEqual(result["profiles"], [{"iccid": "8986"}])
+        self.assertEqual(result["profiles_error"], "")
+        self.assertEqual(result["port"], "/dev/ttyUSB0")
+        self.assertEqual(result["capability"]["profile_fallback_port"], "/dev/ttyUSB0")
+        self.assertEqual(
+            profiles.call_args_list,
+            [
+                call("/dev/ttyUSB2", timeout=45, backend="at"),
+                call("/dev/ttyUSB0", timeout=30, backend="at"),
+            ],
+        )
+
+    @patch.object(server.LPAC, "profiles")
+    @patch.object(server, "ensure_esim_port_available")
+    @patch.object(server.MODEM, "same_port", side_effect=lambda first, second: first == second)
+    def test_profile_retry_reports_each_failed_at_port(self, same_port, ensure_available, profiles):
+        profiles.side_effect = EC20Error("备用端口超时")
+
+        result = server.retry_profiles_on_at_candidates(
+            "/dev/ttyUSB2",
+            {"at_candidates": ["/dev/ttyUSB2", "/dev/ttyUSB0"]},
+            {"backend": "at"},
+            EC20Error("主端口超时"),
+        )
+
+        self.assertEqual(result[0], [])
+        self.assertRegex(result[2], "ttyUSB2: 主端口超时.*ttyUSB0: 备用端口超时")
 
 
 if __name__ == "__main__":
