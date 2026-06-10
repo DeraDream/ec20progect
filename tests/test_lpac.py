@@ -37,13 +37,13 @@ class LpacTest(unittest.TestCase):
             stderr="",
         )
 
-        Lpac.run("/dev/ttyUSB2", "profile", "list", backend="qmi", control_device="/dev/cdc-wdm0", slot=2)
+        Lpac.run("/dev/ttyUSB2", "profile", "list", backend="qmi", control_device="/dev/cdc-wdm0")
 
         self.assertEqual(run.call_args.args[0][0], "lpac-qmi")
         env = run.call_args.kwargs["env"]
         self.assertEqual(env["LPAC_APDU"], "qmi")
         self.assertEqual(env["LPAC_APDU_QMI_DEVICE"], "/dev/cdc-wdm0")
-        self.assertEqual(env["LPAC_APDU_QMI_UIM_SLOT"], "2")
+        self.assertEqual(env["LPAC_APDU_QMI_UIM_SLOT"], "1")
 
     @patch("lpac.Lpac.run")
     def test_read_operations_use_short_timeout(self, run):

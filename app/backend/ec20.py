@@ -41,9 +41,13 @@ class EC20Modem:
     @staticmethod
     def control_devices():
         devices = []
-        for pattern in ("/dev/cdc-wdm*", "/dev/wwan*", "/dev/mhi_*"):
+        for pattern in ("/dev/cdc-wdm*", "/dev/wwan*qmi*", "/dev/mhi_*qmi*"):
             devices.extend(glob.glob(pattern))
         return sorted(set(devices))
+
+    @staticmethod
+    def qrtr_available():
+        return any(os.path.exists(path) for path in ("/sys/class/qrtr", "/proc/net/qrtr", "/dev/qrtr"))
 
     @classmethod
     def same_port(cls, first, second):

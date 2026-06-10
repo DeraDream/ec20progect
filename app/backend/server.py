@@ -65,7 +65,6 @@ def scan_devices():
             "network_interface": (existing or {}).get("network_interface", ""),
             "control_device": (existing or {}).get("control_device", ""),
             "esim_backend": (existing or {}).get("esim_backend", "AUTO"),
-            "esim_slot": (existing or {}).get("esim_slot", 1),
             "apn": (existing or {}).get("apn", ""),
             "mode": (existing or {}).get("mode", "AT"),
             "network_enabled": bool((existing or {}).get("network_enabled", False)),
@@ -125,12 +124,12 @@ def selected_esim_transport():
     if backend == "QMI" or (backend == "AUTO" and control_device):
         if not control_device or not os.path.exists(control_device):
             raise EC20Error("eSIM 已选择 QMI 后端，但未配置可用的 QMI 控制设备（例如 /dev/cdc-wdm0）")
-        slot = max(1, min(5, int(device.get("esim_slot", 1))))
         return port, {"supported": True, "backend": "qmi"}, {
             "backend": "qmi",
             "control_device": control_device,
-            "slot": slot,
         }
+    if backend == "QRTR" or (backend == "AUTO" and MODEM.qrtr_available()):
+        return port, {"supported": True, "backend": "qmi_qrtr"}, {"backend": "qmi_qrtr"}
     esim_port, capability = MODEM.find_esim_port(port)
     if not capability["supported"]:
         missing = "、".join(capability["unsupported"])
@@ -139,7 +138,44 @@ def selected_esim_transport():
             "请确认模组固件支持 AT+CCHO、AT+CCHC 和 AT+CGLA"
         )
     capability["backend"] = "at"
+    capability["auto_reason"] = "未检测到 QMI 控制设备或 QRTR，AUTO 回退到 AT"
     return esim_port, capability, {"backend": "at"}
+
+
+def esim_diagnostics():
+    device = selected_device()
+    configured = str(device.get("esim_backend", "AUTO")).upper()
+    configured_control = str(device.get("control_device", "")).strip()
+    controls = MODEM.control_devices()
+    qrtr = MODEM.qrtr_available()
+    if configured == "QMI":
+        selected = "QMI"
+        reason = f"使用已配置控制设备 {configured_control}" if configured_control else "QMI 未配置控制设备"
+    elif configured == "QRTR":
+        selected = "QRTR"
+        reason = "使用高通 QRTR UIM 服务"
+    elif configured == "AT":
+        selected = "AT"
+        reason = "按配置使用 AT 逻辑通道"
+    elif configured_control:
+        selected = "QMI"
+        reason = f"AUTO 使用已配置控制设备 {configured_control}"
+    elif len(controls) == 1:
+        selected = "QMI"
+        reason = f"AUTO 检测到唯一 QMI 控制设备 {controls[0]}"
+    elif qrtr:
+        selected = "QRTR"
+        reason = "AUTO 检测到高通 QRTR UIM 服务"
+    else:
+        selected = "AT"
+        reason = "AUTO 未检测到 QMI 控制设备或 QRTR，回退到 AT"
+    return {
+        "configured": configured,
+        "selected": selected,
+        "reason": reason,
+        "control_devices": controls,
+        "qrtr": qrtr,
+    }
 
 
 @contextmanager
@@ -199,6 +235,8 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/devices":
                 config = read_config()
                 return self.send_json({"devices": all_devices(), "selected": config.get("selected_device")})
+            if path == "/api/esim/diagnostics":
+                return self.send_json(esim_diagnostics())
             port = selected_port()
             if not port:
                 raise EC20Error("没有检测到可响应 AT 指令的 EC20 串口")
@@ -243,7 +281,6 @@ class Handler(SimpleHTTPRequestHandler):
                     "at_port": port,
                     "control_device": str(data.get("control_device", "")).strip(),
                     "esim_backend": str(data.get("esim_backend", "AUTO")).upper(),
-                    "esim_slot": max(1, min(5, int(data.get("esim_slot", 1)))),
                     "apn": str(data.get("apn", "")).strip(),
                     "mode": str(data.get("mode", "AT")),
                     "network_enabled": bool(data.get("network_enabled")),

@@ -31,6 +31,11 @@ class EC20ModemTest(unittest.TestCase):
         glob.side_effect = [["/dev/cdc-wdm0"], [], []]
         self.assertEqual(EC20Modem.control_devices(), ["/dev/cdc-wdm0"])
 
+    @patch("ec20.os.path.exists")
+    def test_qrtr_available(self, exists):
+        exists.side_effect = lambda path: path == "/sys/class/qrtr"
+        self.assertTrue(EC20Modem.qrtr_available())
+
     @patch.object(EC20Modem, "esim_capability")
     @patch.object(EC20Modem, "command")
     @patch.object(EC20Modem, "at_ports")

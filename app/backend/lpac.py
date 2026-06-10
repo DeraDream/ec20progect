@@ -51,7 +51,7 @@ class Lpac:
         return "未收到 eUICC 响应"
 
     @staticmethod
-    def run(port, *args, timeout=120, backend="at", control_device="", slot=1):
+    def run(port, *args, timeout=120, backend="at", control_device=""):
         env = os.environ.copy()
         env.update({
             "LPAC_APDU": backend,
@@ -61,12 +61,13 @@ class Lpac:
         })
         if backend == "at":
             env["LPAC_APDU_AT_DEBUG"] = "true"
+        if backend in ("qmi", "qmi_qrtr"):
+            env["LPAC_APDU_QMI_UIM_SLOT"] = "1"
         if backend == "qmi":
             env["LPAC_APDU_QMI_DEVICE"] = control_device
-            env["LPAC_APDU_QMI_UIM_SLOT"] = str(slot)
         try:
             process = subprocess.run(
-                ["lpac-qmi" if backend == "qmi" else "lpac", *args],
+                ["lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac", *args],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
@@ -74,7 +75,7 @@ class Lpac:
                 check=False,
             )
         except FileNotFoundError as exc:
-            name = "lpac-qmi" if backend == "qmi" else "lpac"
+            name = "lpac-qmi" if backend in ("qmi", "qmi_qrtr") else "lpac"
             raise EC20Error(f"系统未安装 {name}，请执行 ec20 更新") from exc
         except subprocess.TimeoutExpired as exc:
             partial = exc.stdout or ""

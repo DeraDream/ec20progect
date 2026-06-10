@@ -83,7 +83,7 @@
               <label>IMEI 绑定<input name="imei" readonly></label><label>USB 路径<input name="usb_path" readonly></label>
               <label>网卡接口<input name="network_interface"></label><label>AT 端口<input name="at_port" required></label>
               <label>QMI 控制设备<input name="control_device" placeholder="例如 /dev/cdc-wdm0"></label><label>APN（可选）<input name="apn" placeholder="留空自动识别"></label>
-              <label>eSIM 后端<select name="esim_backend"><option>AUTO</option><option>AT</option><option>QMI</option></select></label><label>eSIM SIM 槽位<input name="esim_slot" type="number" min="1" max="5" value="1"></label>
+              <label>eSIM 后端<select name="esim_backend"><option>AUTO</option><option>AT</option><option>QMI</option><option>QRTR</option></select></label>
               <div class="setting"><div><b>设备运行模式</b><small>AT=传统串口 / QMI=纯 QMI</small></div><select name="mode"><option>AT</option><option>QMI</option></select></div>
               <label class="setting"><div><b>开启网络</b><small>通过 QMI 控制网络开启</small></div><input name="network_enabled" type="checkbox"></label>
               <label class="setting"><div><b>VoWiFi</b><small>开启后设备将进入飞行模式</small></div><input name="vowifi" type="checkbox"></label>
@@ -107,7 +107,7 @@
           <label>IMEI 绑定<input name="imei" readonly></label><label>USB 路径<input name="usb_path" readonly></label>
           <label>网卡接口<input name="network_interface"></label><label>AT 端口<input name="at_port" readonly required></label>
           <label>QMI 控制设备<input name="control_device" placeholder="例如 /dev/cdc-wdm0"></label><label>APN（可选）<input name="apn" placeholder="留空自动识别"></label>
-          <label>eSIM 后端<select name="esim_backend"><option>AUTO</option><option>AT</option><option>QMI</option></select></label><label>eSIM SIM 槽位<input name="esim_slot" type="number" min="1" max="5" value="1"></label>
+          <label>eSIM 后端<select name="esim_backend"><option>AUTO</option><option>AT</option><option>QMI</option><option>QRTR</option></select></label>
           <div class="setting"><div><b>设备后端模式</b><small>AT=串口 / QMI=纯 QMI</small></div><select name="mode"><option>AT</option><option>QMI</option></select></div>
           <label class="setting"><div><b>开启网络</b><small>通过 QMI 控制网络开启</small></div><input name="network_enabled" type="checkbox"></label>
           <label class="setting"><div><b>VoWiFi</b><small>开启后设备将进入飞行模式</small></div><input name="vowifi" type="checkbox"></label>
