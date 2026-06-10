@@ -102,6 +102,20 @@ def selected_port():
     return port
 
 
+def selected_esim_port():
+    port = selected_port()
+    if not port:
+        raise EC20Error("没有检测到可响应 AT 指令的 EC20 串口")
+    esim_port, capability = MODEM.find_esim_port(port)
+    if not capability["supported"]:
+        missing = "、".join(capability["unsupported"])
+        raise EC20Error(
+            f"同一设备的 AT 端口均不支持 eSIM 逻辑通道命令：{missing}。"
+            "请确认模组固件支持 AT+CCHO、AT+CCHC 和 AT+CGLA"
+        )
+    return esim_port, capability
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_DIR), **kwargs)
@@ -149,9 +163,10 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/sms":
                 return self.send_json({"messages": MODEM.list_sms(port)})
             if path == "/api/esim":
-                info = LPAC.info(port)
-                profiles = LPAC.profiles(port)
-                return self.send_json({"info": info, "profiles": profiles})
+                esim_port, capability = selected_esim_port()
+                info = LPAC.info(esim_port)
+                profiles = LPAC.profiles(esim_port)
+                return self.send_json({"info": info, "profiles": profiles, "capability": capability, "port": esim_port})
             return self.send_json({"error": "接口不存在"}, 404)
         except Exception as exc:
             self.send_json({"error": str(exc)}, 503)
@@ -237,15 +252,17 @@ class Handler(SimpleHTTPRequestHandler):
             if path == "/api/estk/apdu":
                 return self.send_json({"response": MODEM.apdu(port, str(data.get("apdu", "")))})
             if path == "/api/esim/profile":
+                esim_port, _ = selected_esim_port()
                 action = str(data.get("action", ""))
                 if action not in ("enable", "disable", "delete", "nickname"):
                     raise EC20Error("不支持的 Profile 操作")
                 value = str(data.get("nickname", "")) if action == "nickname" else None
-                return self.send_json({"ok": True, "result": LPAC.profile_action(port, action, str(data.get("iccid", "")), value)})
+                return self.send_json({"ok": True, "result": LPAC.profile_action(esim_port, action, str(data.get("iccid", "")), value)})
             if path == "/api/esim/download":
+                esim_port, _ = selected_esim_port()
                 if not str(data.get("imei", "")).strip():
                     data["imei"] = MODEM.status(port).get("imei_clean", "")
-                return self.send_json({"ok": True, "result": LPAC.download(port, data)})
+                return self.send_json({"ok": True, "result": LPAC.download(esim_port, data)})
             return self.send_json({"error": "接口不存在"}, 404)
         except (ValueError, TypeError, EC20Error) as exc:
             self.send_json({"error": str(exc)}, 400)

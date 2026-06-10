@@ -28,6 +28,7 @@ class Lpac:
         env = os.environ.copy()
         env.update({
             "LPAC_APDU": "at",
+            "LPAC_APDU_AT_DEVICE": port,
             "AT_DEVICE": port,
             "LPAC_HTTP": "curl",
         })
@@ -43,7 +44,9 @@ class Lpac:
         except FileNotFoundError as exc:
             raise EC20Error("系统未安装 lpac，请执行更新脚本") from exc
         except subprocess.TimeoutExpired as exc:
-            raise EC20Error("lpac 操作超时") from exc
+            raise EC20Error(
+                f"lpac 在 {timeout} 秒内未收到 eUICC 响应；逻辑通道可用，但 eSTK/eSIM 未响应"
+            ) from exc
         stdout = process.stdout.strip()
         stderr = process.stderr.strip()
         output = stdout or stderr

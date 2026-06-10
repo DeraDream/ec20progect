@@ -23,6 +23,9 @@ class LpacTest(unittest.TestCase):
         )
 
         self.assertEqual(Lpac.run("/dev/ttyUSB2", "chip", "info"), {"eid": "123"})
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["LPAC_APDU"], "at")
+        self.assertEqual(env["LPAC_APDU_AT_DEVICE"], "/dev/ttyUSB2")
 
     @patch("lpac.Lpac.run")
     def test_read_operations_use_short_timeout(self, run):

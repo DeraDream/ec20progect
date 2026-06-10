@@ -143,20 +143,103 @@ class EC20Modem:
                 result[key] = f"ERROR: {exc}"
         result["signal_percent"] = self._signal_percent(result["signal"])
         result["model_clean"] = self._value(result["model"])
+        result["firmware_clean"] = self._value(result["firmware"])
         result["imei_clean"] = self._value(result["imei"])
         result["iccid_clean"] = self._value(result["iccid"], "+QCCID:")
-        result["operator_clean"] = self._value(result["operator"], "+COPS:")
+        result["operator_clean"] = self._operator(result["operator"])
         result["imsi_clean"] = self._value(result["imsi"])
         result["number_clean"] = self._value(result["number"], "+CNUM:")
-        result["network_mode_clean"] = self._value(result["network_mode"], "+QNWINFO:")
+        result["network_mode_clean"] = self._network_mode(result["network_mode"])
+        result["registration_clean"] = self._registration(result["registration"])
+        result["sim_clean"] = self._sim_state(result["sim"])
         return result
 
     @staticmethod
     def _value(value, prefix=""):
-        lines = [line.strip() for line in (value or "").splitlines() if line.strip() not in ("OK", "ERROR")]
+        lines = [
+            line.strip()
+            for line in (value or "").splitlines()
+            if line.strip() not in ("OK", "ERROR") and not line.strip().startswith(("+CME ERROR:", "+CMS ERROR:"))
+        ]
         if prefix:
-            lines = [line[len(prefix):].strip() if line.startswith(prefix) else line for line in lines]
+            lines = [line[len(prefix):].strip() for line in lines if line.startswith(prefix)]
         return lines[0] if lines else ""
+
+    @classmethod
+    def _operator(cls, value):
+        raw = cls._value(value, "+COPS:")
+        match = re.match(r'\d+,\d+,"([^"]*)"(?:,\d+)?', raw)
+        return match.group(1) if match else raw
+
+    @classmethod
+    def _network_mode(cls, value):
+        raw = cls._value(value, "+QNWINFO:")
+        fields = re.findall(r'"([^"]*)"', raw)
+        if not fields:
+            return raw
+        return " · ".join(item for item in (fields[0], fields[2] if len(fields) > 2 else "") if item)
+
+    @classmethod
+    def _registration(cls, value):
+        raw = cls._value(value, "+CREG:")
+        match = re.match(r"\d+,(\d+)", raw)
+        states = {
+            "0": "未注册",
+            "1": "已注册（本地）",
+            "2": "正在搜索",
+            "3": "注册被拒绝",
+            "4": "未知",
+            "5": "已注册（漫游）",
+        }
+        return states.get(match.group(1), raw) if match else raw
+
+    @classmethod
+    def _sim_state(cls, value):
+        raw = cls._value(value, "+CPIN:")
+        states = {
+            "READY": "就绪",
+            "SIM PIN": "需要 SIM PIN",
+            "SIM PUK": "需要 SIM PUK",
+            "NOT INSERTED": "未插卡",
+        }
+        return states.get(raw.upper(), raw)
+
+    def esim_capability(self, port):
+        required = ("AT+CCHO=?", "AT+CCHC=?", "AT+CGLA=?")
+        results = {}
+        for command in required:
+            try:
+                response = self.command(port, command, timeout=3)
+            except Exception as exc:
+                response = f"ERROR: {exc}"
+            results[command] = response
+        unsupported = [command for command, response in results.items() if not self._command_ok(response)]
+        return {"supported": not unsupported, "unsupported": unsupported, "responses": results}
+
+    def find_esim_port(self, preferred_port):
+        preferred_capability = self.esim_capability(preferred_port)
+        if preferred_capability["supported"]:
+            return preferred_port, preferred_capability
+
+        preferred_imei = self._value(self.command(preferred_port, "AT+CGSN", timeout=2))
+        for port in self.at_ports():
+            if self.same_port(port, preferred_port):
+                continue
+            try:
+                imei = self._value(self.command(port, "AT+CGSN", timeout=2))
+                if not preferred_imei or imei != preferred_imei:
+                    continue
+                capability = self.esim_capability(port)
+                if capability["supported"]:
+                    return port, capability
+            except (EC20Error, OSError, termios.error):
+                continue
+        return preferred_port, preferred_capability
+
+    @staticmethod
+    def _command_ok(response):
+        lines = [line.strip() for line in (response or "").splitlines() if line.strip()]
+        return bool(lines and lines[-1] == "OK")
 
     @staticmethod
     def _signal_percent(value):
